@@ -8,6 +8,10 @@
         'G': { label: 'GERAL', cor: '#95a5a6', corFundo: '#1a1a1a', tempo: 15, icone: '⚪' }
     };
 
+    // Guarda as senhas lidas + o momento exato da leitura, para contar segundo a segundo localmente
+    let senhasAtuais = [];
+    let momentoLeitura = Date.now();
+
     // ── PAINEL PRINCIPAL ─────────────────────────────────────────
     const painel = document.createElement('div');
     painel.id = 'painel-senhas-sabin';
@@ -99,7 +103,8 @@
 
             // Calcula % do tempo limite atingido (regra de urgência combinada)
             const partes = tempoEspera.split(':').map(Number);
-            const minutos = partes[0] * 60 + partes[1] + partes[2] / 60;
+            const segundosTotais = partes[0] * 3600 + partes[1] * 60 + partes[2];
+            const minutos = segundosTotais / 60;
             const limite = PRIORIDADE[priorLetra]?.tempo || 15;
             const percentual = Math.min((minutos / limite) * 100, 999);
             const urgente = percentual >= 80;
@@ -111,6 +116,7 @@
                 tipo: TIPOS[tipoLetra] || tipoLetra,
                 prioridade: priorLetra,
                 tempo: tempoEspera,
+                segundosTotais,
                 minutos,
                 percentual,
                 urgente
@@ -119,6 +125,10 @@
 
         // Ordena por % do tempo limite atingido (regra de urgência combinada — fila justa)
         senhas.sort((a, b) => b.percentual - a.percentual);
+
+        // Salva para o relógio local (segundo a segundo) usar como base
+        senhasAtuais = senhas;
+        momentoLeitura = Date.now();
 
         // Atualiza contadores
         ['A', 'P', 'G'].forEach(p => {
@@ -137,14 +147,15 @@
                     <div style="font-size:22px;">${cfgTop.icone}</div>
                     <div style="flex:1;">
                         <div style="font-weight:700; font-size:18px; color:#fff;">${top.senha}</div>
-                        <div style="font-size:11px; color:#888;">${top.tipo} · ${cfgTop.label} · ⏱ ${top.tempo}</div>
+                        <div style="font-size:11px; color:#888;">${top.tipo} · ${cfgTop.label} · <span class="tempo-vivo-recom">⏱ ${top.tempo}</span></div>
                     </div>
                     <div style="text-align:right;">
-                        <div style="font-size:16px; font-weight:700; color:${top.percentual >= 100 ? '#e74c3c' : '#2ecc71'};">${Math.round(top.percentual)}%</div>
+                        <div class="pct-vivo-recom" style="font-size:16px; font-weight:700; color:${top.percentual >= 100 ? '#e74c3c' : '#2ecc71'};">${Math.round(top.percentual)}%</div>
                         <div style="font-size:9px; color:#666;">do limite</div>
                     </div>
                 </div>
             `;
+            boxRecomendada.dataset.senhaTop = top.senha;
         } else {
             boxRecomendada.style.display = 'none';
         }
@@ -158,7 +169,7 @@
                 const bordaUrgente = s.urgente ? `box-shadow: 0 0 8px ${cfg.cor}; animation: pisca 1s infinite;` : '';
                 const corPercentual = s.percentual >= 100 ? '#e74c3c' : (s.percentual >= 80 ? '#e67e22' : '#888');
                 return `
-                    <div style="
+                    <div data-card-senha="${s.senha}" style="
                         display:flex; align-items:center; gap:10px;
                         background:${cfg.corFundo}; border:1px solid ${cfg.cor}44;
                         border-left: 3px solid ${cfg.cor};
@@ -172,8 +183,8 @@
                             <div style="font-size:11px; color:#888;">${s.tipo} · ${cfg.label}</div>
                         </div>
                         <div style="text-align:right;">
-                            <div style="font-size:13px; color:${s.urgente ? cfg.cor : '#aaa'}; font-weight:${s.urgente ? '700' : '400'};">⏱ ${s.tempo}</div>
-                            <div style="font-size:11px; color:${corPercentual}; font-weight:700;">${Math.round(s.percentual)}%</div>
+                            <div class="tempo-vivo" data-senha="${s.senha}" style="font-size:13px; color:${s.urgente ? cfg.cor : '#aaa'}; font-weight:${s.urgente ? '700' : '400'};">⏱ ${s.tempo}</div>
+                            <div class="pct-vivo" data-senha="${s.senha}" style="font-size:11px; color:${corPercentual}; font-weight:700;">${Math.round(s.percentual)}%</div>
                         </div>
                     </div>
                 `;
@@ -188,14 +199,73 @@
     style.innerHTML = `@keyframes pisca { 0%,100%{opacity:1} 50%{opacity:0.5} }`;
     document.head.appendChild(style);
 
+    // Formata segundos totais em HH:MM:SS
+    function formatarTempo(segundosTotais) {
+        const h = Math.floor(segundosTotais / 3600);
+        const m = Math.floor((segundosTotais % 3600) / 60);
+        const s = Math.floor(segundosTotais % 60);
+        return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+    }
+
+    // Roda a cada 1 segundo: soma o tempo decorrido desde a última leitura real da tela
+    // e atualiza só os textos (sem reler o DOM do sistema, sem piscar a lista)
+    function tick() {
+        if (!document.getElementById('painel-senhas-sabin')) return;
+        const decorridoSeg = (Date.now() - momentoLeitura) / 1000;
+
+        const elsTempo = document.querySelectorAll('#painel-senhas-sabin .tempo-vivo');
+        const elsPct = document.querySelectorAll('#painel-senhas-sabin .pct-vivo');
+
+        senhasAtuais.forEach((s, idx) => {
+            const segundosAgora = s.segundosTotais + decorridoSeg;
+            const minutosAgora = segundosAgora / 60;
+            const limite = PRIORIDADE[s.prioridade]?.tempo || 15;
+            const percentualAgora = Math.min((minutosAgora / limite) * 100, 999);
+            const tempoFormatado = formatarTempo(segundosAgora);
+
+            const elTempo = elsTempo[idx];
+            const elPct = elsPct[idx];
+            if (elTempo) elTempo.innerText = '⏱ ' + tempoFormatado;
+            if (elPct) {
+                elPct.innerText = Math.round(percentualAgora) + '%';
+                elPct.style.color = percentualAgora >= 100 ? '#e74c3c' : (percentualAgora >= 80 ? '#e67e22' : '#888');
+            }
+        });
+
+        // Atualiza também o card "Próxima Recomendada" (sempre é a primeira da lista ordenada)
+        const boxRecomendada = document.getElementById('proxima-recomendada');
+        if (boxRecomendada && senhasAtuais.length > 0 && boxRecomendada.style.display !== 'none') {
+            const top = senhasAtuais[0];
+            const segundosAgora = top.segundosTotais + decorridoSeg;
+            const minutosAgora = segundosAgora / 60;
+            const limite = PRIORIDADE[top.prioridade]?.tempo || 15;
+            const percentualAgora = Math.min((minutosAgora / limite) * 100, 999);
+            const tempoFormatado = formatarTempo(segundosAgora);
+
+            const elTempoRecom = boxRecomendada.querySelector('.tempo-vivo-recom');
+            const elPctRecom = boxRecomendada.querySelector('.pct-vivo-recom');
+            if (elTempoRecom) elTempoRecom.innerText = '⏱ ' + tempoFormatado;
+            if (elPctRecom) {
+                elPctRecom.innerText = Math.round(percentualAgora) + '%';
+                elPctRecom.style.color = percentualAgora >= 100 ? '#e74c3c' : '#2ecc71';
+            }
+        }
+    }
+
     // Atualiza ao clicar
     document.getElementById('btn-atualizar-painel').onclick = lerSenhas;
 
-    // Atualiza automaticamente a cada 30 segundos
+    // Lê a tela de verdade a cada 5 segundos (pega senhas novas, remove as que sumiram)
     lerSenhas();
-    const intervalo = setInterval(() => {
-        if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intervalo); return; }
+    const intervaloLeitura = setInterval(() => {
+        if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intervaloLeitura); return; }
         lerSenhas();
     }, 5000);
+
+    // Conta segundo a segundo por cima, sem reler a tela (cronômetro vivo)
+    const intervaloTick = setInterval(() => {
+        if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intervaloTick); return; }
+        tick();
+    }, 1000);
 
 })();

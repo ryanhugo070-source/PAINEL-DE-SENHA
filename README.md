@@ -57,70 +57,45 @@
         const lista = document.getElementById('lista-senhas-painel');
         lista.innerHTML = '<div style="text-align:center;color:#555;padding:20px;">Lendo senhas...</div>';
 
-        // Tenta achar o container da "Fila de Senhas" (ignora histórico)
-        let areaFila = null;
-        const todosElementos = Array.from(document.querySelectorAll('*'));
-        const tituloFila = todosElementos.find(el =>
-            el.children.length === 0 && /fila de senhas/i.test(el.innerText || '')
-        );
-        if (tituloFila) {
-            // Sobe até achar um container pai que tenha as senhas dentro, mas não o histórico
-            let candidato = tituloFila.parentElement;
-            for (let i = 0; i < 6 && candidato; i++) {
-                if (candidato.querySelectorAll('*').length > 5) { areaFila = candidato; break; }
-                candidato = candidato.parentElement;
-            }
-        }
-        const escopo = areaFila || document;
+        // ── Estratégia robusta: acha o "card" que contém a senha inteira (senha + tempo) ──
+        // Um card válido é o menor elemento cujo texto bate com o padrão completo:
+        // CÓDIGO + (PRIORIDADE/NORMAL/etc) + HH:MM:SS — tudo junto, sem outra senha dentro.
+        const REGEX_SENHA = /([A-Z]{1,2})(\d{3})/;       // ex: PP177, RA265, EG091
+        const REGEX_TEMPO = /(\d{2}:\d{2}:\d{2})/;
 
-        // Pega elementos de senha SÓ dentro da área da fila (evita histórico duplicado)
-        const elementos = Array.from(escopo.querySelectorAll('*')).filter(el => {
-            if (el.children.length > 2) return false;
-            const txt = el.innerText?.trim();
-            if (!txt || !/^[REPADV][APG]\d{3}$/.test(txt)) return false;
-            // Ignora se estiver dentro do painel injetado ou da área de Histórico
+        const candidatos = Array.from(document.querySelectorAll('div, li')).filter(el => {
             if (el.closest('#painel-senhas-sabin')) return false;
-            const maisProximoComTitulo = el.closest('div');
-            return true;
+            const txt = el.innerText || '';
+            if (!REGEX_SENHA.test(txt) || !REGEX_TEMPO.test(txt)) return false;
+            // Conta quantas senhas distintas aparecem no texto desse elemento
+            const todasSenhas = new Set((txt.match(/[A-Z]{1,2}\d{3}/g) || []));
+            return todasSenhas.size === 1; // só queremos o card de UMA senha só
         });
 
-        // Monta lista de senhas únicas (cada número de senha aparece só 1 vez)
+        // Entre os candidatos (que podem ser pai/filho um do outro), pega só o MENOR de cada grupo
         const senhasVistas = new Set();
         const senhas = [];
 
-        elementos.forEach(el => {
-            const txt = el.innerText?.trim();
-            const match = txt?.match(/^([REPADV])([APG])(\d{3})$/);
-            if (!match) return;
-            const chaveSenha = txt; // já é a senha completa, ex: EP042
+        // Ordena do menor texto pro maior, assim pegamos o card mais "específico" primeiro
+        candidatos.sort((a, b) => (a.innerText?.length || 0) - (b.innerText?.length || 0));
 
-            // Pula se já vimos esse número de senha (evita duplicação do mesmo card)
-            if (senhasVistas.has(chaveSenha)) return;
+        candidatos.forEach(el => {
+            const txt = el.innerText || '';
+            const matchSenha = txt.match(/([A-Z]{1,2})(\d{3})/);
+            const matchTempo = txt.match(REGEX_TEMPO);
+            if (!matchSenha || !matchTempo) return;
 
-            // Sobe pais até achar o card que contém SÓ essa senha + seu próprio tempo
-            // (precisa ser um container que não tenha outra senha dentro)
-            let card = el;
-            let tempoEspera = null;
-            for (let i = 0; i < 6; i++) {
-                if (!card.parentElement) break;
-                card = card.parentElement;
-                const textoCard = card.innerText || '';
-                // Conta quantas senhas distintas aparecem nesse card
-                const senhasNoCard = (textoCard.match(/[REPADV][APG]\d{3}/g) || []);
-                const senhasUnicasNoCard = new Set(senhasNoCard);
-                if (senhasUnicasNoCard.size > 1) break; // ultrapassou o card individual, para
-                const tempoMatch = textoCard.match(/(\d{2}:\d{2}:\d{2})/);
-                if (tempoMatch) { tempoEspera = tempoMatch[1]; }
-            }
+            const codigoCompleto = matchSenha[0]; // ex: PP177
+            if (senhasVistas.has(codigoCompleto)) return;
+            senhasVistas.add(codigoCompleto);
 
-            // Se não achou tempo de espera no card próprio, pode ser item de histórico — pula
-            if (!tempoEspera) return;
+            const prefixo = matchSenha[1]; // 1 ou 2 letras antes do número
+            // Identifica a letra de prioridade (a última letra do prefixo)
+            const priorLetra = prefixo.slice(-1);
+            const tipoLetra = prefixo.length > 1 ? prefixo.slice(0, -1) : prefixo;
+            const tempoEspera = matchTempo[1];
 
-            senhasVistas.add(chaveSenha);
-
-            const tipoLetra = match[1];
-            const priorLetra = match[2];
-            const numero = match[3];
+            if (!['A', 'P', 'G'].includes(priorLetra)) return; // ignora se não reconhecer
 
             // Calcula % do tempo limite atingido (regra de urgência combinada)
             const partes = tempoEspera.split(':').map(Number);
@@ -132,7 +107,7 @@
             const TIPOS = { R: 'Resultado', E: 'Exames', P: 'Pendência', A: 'Agendamento', D: 'Digital', V: 'Vacina' };
 
             senhas.push({
-                senha: `${tipoLetra}${priorLetra}${numero}`,
+                senha: codigoCompleto,
                 tipo: TIPOS[tipoLetra] || tipoLetra,
                 prioridade: priorLetra,
                 tempo: tempoEspera,
@@ -221,6 +196,6 @@
     const intervalo = setInterval(() => {
         if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intervalo); return; }
         lerSenhas();
-    }, 30000);
+    }, 5000);
 
 })();

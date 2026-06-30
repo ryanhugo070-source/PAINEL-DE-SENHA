@@ -27,6 +27,10 @@
                 <button onclick="document.getElementById('painel-senhas-sabin').remove()" style="background:#444; border:none; color:#fff; border-radius:6px; padding:4px 8px; cursor:pointer; font-size:12px;">✕</button>
             </div>
         </div>
+        <div id="proxima-recomendada" style="padding:10px 12px; background:#0a1f0a; border-bottom:1px solid #2a2a2a; display:none;">
+            <div style="font-size:10px; color:#2ecc71; font-weight:700; margin-bottom:4px;">✅ PRÓXIMA RECOMENDADA (fila justa)</div>
+            <div id="conteudo-recomendada"></div>
+        </div>
         <div style="padding:10px 12px; background:#161616; border-bottom:1px solid #2a2a2a; display:flex; gap:8px; flex-wrap:wrap;">
             <div id="contador-A" style="flex:1; text-align:center; background:#2c0a0a; border:1px solid #e74c3c; border-radius:8px; padding:6px;">
                 <div style="font-size:20px; font-weight:700; color:#e74c3c;" id="num-A">0</div>
@@ -118,12 +122,12 @@
             const priorLetra = match[2];
             const numero = match[3];
 
-            // Calcula se está próximo do limite
-            let urgente = false;
+            // Calcula % do tempo limite atingido (regra de urgência combinada)
             const partes = tempoEspera.split(':').map(Number);
-            const minutos = partes[0] * 60 + partes[1];
+            const minutos = partes[0] * 60 + partes[1] + partes[2] / 60;
             const limite = PRIORIDADE[priorLetra]?.tempo || 15;
-            urgente = minutos >= (limite - 2);
+            const percentual = Math.min((minutos / limite) * 100, 999);
+            const urgente = percentual >= 80;
 
             const TIPOS = { R: 'Resultado', E: 'Exames', P: 'Pendência', A: 'Agendamento', D: 'Digital', V: 'Vacina' };
 
@@ -132,30 +136,52 @@
                 tipo: TIPOS[tipoLetra] || tipoLetra,
                 prioridade: priorLetra,
                 tempo: tempoEspera,
+                minutos,
+                percentual,
                 urgente
             });
         });
 
-        // Ordena: A primeiro, P segundo, G por último; dentro de cada grupo por tempo
-        senhas.sort((a, b) => {
-            const ordem = { A: 0, P: 1, G: 2 };
-            if (ordem[a.prioridade] !== ordem[b.prioridade]) return ordem[a.prioridade] - ordem[b.prioridade];
-            if (a.tempo && b.tempo) return b.tempo.localeCompare(a.tempo);
-            return 0;
-        });
+        // Ordena por % do tempo limite atingido (regra de urgência combinada — fila justa)
+        senhas.sort((a, b) => b.percentual - a.percentual);
 
         // Atualiza contadores
         ['A', 'P', 'G'].forEach(p => {
             document.getElementById(`num-${p}`).innerText = senhas.filter(s => s.prioridade === p).length;
         });
 
+        // Mostra a recomendação no topo (maior % do tempo limite)
+        const boxRecomendada = document.getElementById('proxima-recomendada');
+        const conteudoRecomendada = document.getElementById('conteudo-recomendada');
+        if (senhas.length > 0) {
+            const top = senhas[0];
+            const cfgTop = PRIORIDADE[top.prioridade];
+            boxRecomendada.style.display = 'block';
+            conteudoRecomendada.innerHTML = `
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="font-size:22px;">${cfgTop.icone}</div>
+                    <div style="flex:1;">
+                        <div style="font-weight:700; font-size:18px; color:#fff;">${top.senha}</div>
+                        <div style="font-size:11px; color:#888;">${top.tipo} · ${cfgTop.label} · ⏱ ${top.tempo}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-size:16px; font-weight:700; color:${top.percentual >= 100 ? '#e74c3c' : '#2ecc71'};">${Math.round(top.percentual)}%</div>
+                        <div style="font-size:9px; color:#666;">do limite</div>
+                    </div>
+                </div>
+            `;
+        } else {
+            boxRecomendada.style.display = 'none';
+        }
+
         // Renderiza lista
         if (senhas.length === 0) {
             lista.innerHTML = '<div style="text-align:center;color:#555;padding:20px;font-size:13px;">Nenhuma senha encontrada na tela</div>';
         } else {
-            lista.innerHTML = senhas.map(s => {
+            lista.innerHTML = senhas.map((s, idx) => {
                 const cfg = PRIORIDADE[s.prioridade];
                 const bordaUrgente = s.urgente ? `box-shadow: 0 0 8px ${cfg.cor}; animation: pisca 1s infinite;` : '';
+                const corPercentual = s.percentual >= 100 ? '#e74c3c' : (s.percentual >= 80 ? '#e67e22' : '#888');
                 return `
                     <div style="
                         display:flex; align-items:center; gap:10px;
@@ -164,14 +190,15 @@
                         border-radius:8px; padding:8px 10px; margin-bottom:6px;
                         ${bordaUrgente}
                     ">
+                        <div style="font-size:11px; color:#555; width:16px;">${idx + 1}º</div>
                         <div style="font-size:18px;">${cfg.icone}</div>
                         <div style="flex:1;">
                             <div style="font-weight:700; font-size:15px; color:${cfg.cor};">${s.senha}</div>
                             <div style="font-size:11px; color:#888;">${s.tipo} · ${cfg.label}</div>
                         </div>
                         <div style="text-align:right;">
-                            ${s.tempo ? `<div style="font-size:13px; color:${s.urgente ? cfg.cor : '#aaa'}; font-weight:${s.urgente ? '700' : '400'};">⏱ ${s.tempo}</div>` : ''}
-                            ${s.urgente ? `<div style="font-size:10px; color:${cfg.cor}; font-weight:700;">⚠️ URGENTE</div>` : ''}
+                            <div style="font-size:13px; color:${s.urgente ? cfg.cor : '#aaa'}; font-weight:${s.urgente ? '700' : '400'};">⏱ ${s.tempo}</div>
+                            <div style="font-size:11px; color:${corPercentual}; font-weight:700;">${Math.round(s.percentual)}%</div>
                         </div>
                     </div>
                 `;

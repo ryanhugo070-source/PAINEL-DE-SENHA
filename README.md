@@ -53,41 +53,77 @@
         const lista = document.getElementById('lista-senhas-painel');
         lista.innerHTML = '<div style="text-align:center;color:#555;padding:20px;">Lendo senhas...</div>';
 
-        // Pega todos os elementos de senha na tela
-        const elementos = Array.from(document.querySelectorAll('*')).filter(el => {
-            if (el.children.length > 3) return false;
+        // Tenta achar o container da "Fila de Senhas" (ignora histórico)
+        let areaFila = null;
+        const todosElementos = Array.from(document.querySelectorAll('*'));
+        const tituloFila = todosElementos.find(el =>
+            el.children.length === 0 && /fila de senhas/i.test(el.innerText || '')
+        );
+        if (tituloFila) {
+            // Sobe até achar um container pai que tenha as senhas dentro, mas não o histórico
+            let candidato = tituloFila.parentElement;
+            for (let i = 0; i < 6 && candidato; i++) {
+                if (candidato.querySelectorAll('*').length > 5) { areaFila = candidato; break; }
+                candidato = candidato.parentElement;
+            }
+        }
+        const escopo = areaFila || document;
+
+        // Pega elementos de senha SÓ dentro da área da fila (evita histórico duplicado)
+        const elementos = Array.from(escopo.querySelectorAll('*')).filter(el => {
+            if (el.children.length > 2) return false;
             const txt = el.innerText?.trim();
-            return txt && /^[REPADV][APG]\d{3}/.test(txt);
+            if (!txt || !/^[REPADV][APG]\d{3}$/.test(txt)) return false;
+            // Ignora se estiver dentro do painel injetado ou da área de Histórico
+            if (el.closest('#painel-senhas-sabin')) return false;
+            const maisProximoComTitulo = el.closest('div');
+            return true;
         });
 
-        // Monta lista de senhas únicas
+        // Monta lista de senhas únicas (cada número de senha aparece só 1 vez)
         const senhasVistas = new Set();
         const senhas = [];
 
         elementos.forEach(el => {
             const txt = el.innerText?.trim();
-            const match = txt?.match(/^([REPADV])([APG])(\d{3})/);
-            if (!match || senhasVistas.has(txt)) return;
-            senhasVistas.add(txt);
+            const match = txt?.match(/^([REPADV])([APG])(\d{3})$/);
+            if (!match) return;
+            const chaveSenha = txt; // já é a senha completa, ex: EP042
+
+            // Pula se já vimos esse número de senha (evita duplicação do mesmo card)
+            if (senhasVistas.has(chaveSenha)) return;
+
+            // Sobe pais até achar o card que contém SÓ essa senha + seu próprio tempo
+            // (precisa ser um container que não tenha outra senha dentro)
+            let card = el;
+            let tempoEspera = null;
+            for (let i = 0; i < 6; i++) {
+                if (!card.parentElement) break;
+                card = card.parentElement;
+                const textoCard = card.innerText || '';
+                // Conta quantas senhas distintas aparecem nesse card
+                const senhasNoCard = (textoCard.match(/[REPADV][APG]\d{3}/g) || []);
+                const senhasUnicasNoCard = new Set(senhasNoCard);
+                if (senhasUnicasNoCard.size > 1) break; // ultrapassou o card individual, para
+                const tempoMatch = textoCard.match(/(\d{2}:\d{2}:\d{2})/);
+                if (tempoMatch) { tempoEspera = tempoMatch[1]; }
+            }
+
+            // Se não achou tempo de espera no card próprio, pode ser item de histórico — pula
+            if (!tempoEspera) return;
+
+            senhasVistas.add(chaveSenha);
 
             const tipoLetra = match[1];
             const priorLetra = match[2];
             const numero = match[3];
 
-            // Tenta pegar o tempo de espera
-            const container = el.closest('[class]') || el.parentElement;
-            const textoContainer = container?.innerText || '';
-            const tempoMatch = textoContainer.match(/(\d{2}:\d{2}:\d{2})/);
-            const tempoEspera = tempoMatch ? tempoMatch[1] : null;
-
             // Calcula se está próximo do limite
             let urgente = false;
-            if (tempoEspera) {
-                const partes = tempoEspera.split(':').map(Number);
-                const minutos = partes[0] * 60 + partes[1];
-                const limite = PRIORIDADE[priorLetra]?.tempo || 15;
-                urgente = minutos >= (limite - 2);
-            }
+            const partes = tempoEspera.split(':').map(Number);
+            const minutos = partes[0] * 60 + partes[1];
+            const limite = PRIORIDADE[priorLetra]?.tempo || 15;
+            urgente = minutos >= (limite - 2);
 
             const TIPOS = { R: 'Resultado', E: 'Exames', P: 'Pendência', A: 'Agendamento', D: 'Digital', V: 'Vacina' };
 

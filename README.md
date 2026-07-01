@@ -69,11 +69,14 @@
 
         const candidatos = Array.from(document.querySelectorAll('div, li')).filter(el => {
             if (el.closest('#painel-senhas-sabin')) return false;
-            const txt = el.innerText || '';
-            if (!REGEX_SENHA.test(txt) || !REGEX_TEMPO.test(txt)) return false;
+            // Ignora área de atendimento ativo (card central roxo/colorido com "Atendendo", "Chamando", "Finalizar" etc)
+            const textoEl = el.innerText || '';
+            if (!REGEX_SENHA.test(textoEl) || !REGEX_TEMPO.test(textoEl)) return false;
+            // Ignora se o card contém palavras típicas de atendimento ativo ou histórico
+            if (/Atendendo|Chamando|Finalizar|Transferir|Não Compareceu|Concluída|TEMPO DE ATENDIMENTO|Chamada às/i.test(textoEl)) return false;
             // Conta quantas senhas distintas aparecem no texto desse elemento
-            const todasSenhas = new Set((txt.match(/[A-Z]{1,2}\d{3}/g) || []));
-            return todasSenhas.size === 1; // só queremos o card de UMA senha só
+            const todasSenhas = new Set((textoEl.match(/[A-Z]{1,2}\d{3}/g) || []));
+            return todasSenhas.size === 1;
         });
 
         // Entre os candidatos (que podem ser pai/filho um do outro), pega só o MENOR de cada grupo

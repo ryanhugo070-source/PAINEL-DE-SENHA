@@ -66,20 +66,17 @@
 
     // ── LER SENHAS DA TELA ───────────────────────────────────────
     function lerSenhas() {
-        // 1. Identifica senhas em atendimento ATIVO — apenas no card central (não no histórico)
-        // O card ativo tem "Atendendo" E um cronômetro de atendimento (não de espera)
+        // 1. Identifica senhas em atendimento ATIVO
+        // O card ativo tem "TEMPO DE ATENDIMENTO" — isso é único do card central roxo
         const emAtendimento = new Set();
         Array.from(document.querySelectorAll('div')).forEach(el => {
             if (el.closest('#painel-senhas-sabin')) return;
             const txt = el.innerText || '';
-            // Card ativo tem TODOS esses elementos juntos
-            if (!/Atendendo|Chamando/i.test(txt)) return;
-            if (!/Chamada às/i.test(txt)) return;
-            // Extrai senhas desse card
+            if (!/TEMPO DE ATENDIMENTO/i.test(txt)) return;
             (txt.match(/[A-Z]{1,2}\d{3}/g) || []).forEach(s => emAtendimento.add(s));
         });
 
-        const IGNORAR = /Atendendo|Chamando|Finalizar|Transferir|Não Compareceu|Concluída|TEMPO DE ATENDIMENTO|Chamada às|Repetir Chamada|Finalizado pelo/i;
+        const IGNORAR = /TEMPO DE ATENDIMENTO|Finalizado pelo|Concluída/i;
 
         // 2. Lê os cards da fila ignorando os que estão em atendimento
         const vistos = new Set();

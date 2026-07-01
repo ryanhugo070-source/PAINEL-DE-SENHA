@@ -78,28 +78,34 @@
 
         const IGNORAR = /TEMPO DE ATENDIMENTO|Finalizado pelo|Concluída/i;
 
-        // 2. Lê os cards da fila ignorando os que estão em atendimento
+        // 2. Lê os cards da fila — pega o MENOR elemento que tem exatamente 1 senha + 1 tempo
         const vistos = new Set();
         const novas = [];
 
-        Array.from(document.querySelectorAll('div,li')).forEach(el => {
-            if (el.closest('#painel-senhas-sabin')) return;
+        // Ordena por tamanho do texto (menor primeiro = mais específico)
+        const todos = Array.from(document.querySelectorAll('div,li'))
+            .filter(el => {
+                if (el.closest('#painel-senhas-sabin')) return false;
+                const txt = el.innerText || '';
+                return /[A-Z]{1,2}\d{3}/.test(txt) && /\d{2}:\d{2}:\d{2}/.test(txt);
+            })
+            .sort((a,b) => (a.innerText?.length||0) - (b.innerText?.length||0));
+
+        todos.forEach(el => {
             const txt = el.innerText || '';
-            if (!txt || !/[A-Z]{1,2}\d{3}/.test(txt) || !/\d{2}:\d{2}:\d{2}/.test(txt)) return;
             if (IGNORAR.test(txt)) return;
 
-            // Só pega o card com UMA senha única
             const senhasNoCard = new Set((txt.match(/[A-Z]{1,2}\d{3}/g)||[]));
             if (senhasNoCard.size !== 1) return;
 
             const codSenha = [...senhasNoCard][0];
             if (vistos.has(codSenha)) return;
-
-            // Ignora se essa senha está em atendimento ativo
             if (emAtendimento.has(codSenha)) return;
 
             const tempoMatch = txt.match(/(\d{2}:\d{2}:\d{2})/);
             if (!tempoMatch) return;
+
+            vistos.add(codSenha);
 
             const partes = tempoMatch[1].split(':').map(Number);
             const segundos = partes[0]*3600 + partes[1]*60 + partes[2];
@@ -109,8 +115,6 @@
             const priorLetra = prefixo.slice(-1);
             if (!['A','P','G'].includes(priorLetra)) return;
             const tipoLetra = prefixo.length > 1 ? prefixo[0] : prefixo;
-
-            vistos.add(codSenha);
 
             // Verifica se já tinha essa senha no baseDados para preservar o timestamp
             const anterior = baseDados.find(b => b.senha === codSenha);

@@ -66,33 +66,28 @@
 
     // ── LER SENHAS DA TELA ───────────────────────────────────────
     function lerSenhas() {
-        // 1. Identifica senhas em atendimento ATIVO
-        // O card ativo tem "TEMPO DE ATENDIMENTO" — isso é único do card central roxo
+        // Pega senha em atendimento ativo pelo card central (tem "TEMPO DE ATENDIMENTO")
         const emAtendimento = new Set();
         Array.from(document.querySelectorAll('div')).forEach(el => {
             if (el.closest('#painel-senhas-sabin')) return;
             const txt = el.innerText || '';
+            if (txt.length > 500) return; // ignora elementos muito grandes (pai de tudo)
             if (!/TEMPO DE ATENDIMENTO/i.test(txt)) return;
-            (txt.match(/[A-Z]{1,2}\d{3}/g) || []).forEach(s => emAtendimento.add(s));
+            (txt.match(/[A-Z]{1,2}\d{3}/g)||[]).forEach(s => emAtendimento.add(s));
         });
 
-        const IGNORAR = /TEMPO DE ATENDIMENTO|Finalizado pelo|Concluída/i;
-
-        // 2. Lê os cards da fila — pega o MENOR elemento que tem exatamente 1 senha + 1 tempo
+        const IGNORAR = /TEMPO DE ATENDIMENTO|Finalizado pelo|Concluída|Histórico/i;
         const vistos = new Set();
         const novas = [];
 
-        // Ordena por tamanho do texto (menor primeiro = mais específico)
-        const todos = Array.from(document.querySelectorAll('div,li'))
-            .filter(el => {
-                if (el.closest('#painel-senhas-sabin')) return false;
-                const txt = el.innerText || '';
-                return /[A-Z]{1,2}\d{3}/.test(txt) && /\d{2}:\d{2}:\d{2}/.test(txt);
-            })
-            .sort((a,b) => (a.innerText?.length||0) - (b.innerText?.length||0));
-
-        todos.forEach(el => {
-            const txt = el.innerText || '';
+        // Pega só os elementos PEQUENOS (cards individuais da fila da esquerda)
+        // Um card individual tem entre 20 e 120 caracteres tipicamente
+        Array.from(document.querySelectorAll('div,li')).forEach(el => {
+            if (el.closest('#painel-senhas-sabin')) return;
+            const txt = (el.innerText || '').trim();
+            if (txt.length < 10 || txt.length > 150) return; // só cards pequenos
+            if (!/[A-Z]{1,2}\d{3}/.test(txt)) return;
+            if (!/\d{2}:\d{2}:\d{2}/.test(txt)) return;
             if (IGNORAR.test(txt)) return;
 
             const senhasNoCard = new Set((txt.match(/[A-Z]{1,2}\d{3}/g)||[]));

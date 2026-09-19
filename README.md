@@ -1,4 +1,4 @@
-javascript:(function(){
+(function(){
     if (window.psbLerInterval) clearInterval(window.psbLerInterval);
     if (window.psbTickInterval) clearInterval(window.psbTickInterval);
     if (window.psbIntervals && Array.isArray(window.psbIntervals)) {
@@ -53,6 +53,19 @@ javascript:(function(){
             osc.start();
             osc.stop(ctx.currentTime + 0.3);
         } catch (e) {}
+    }
+
+    function obterTotalSabinOficial() {
+        let total = null;
+        Array.from(document.querySelectorAll('div, span, p')).forEach(el => {
+            if (el.children.length > 0) return;
+            const txt = (el.innerText || '').trim();
+            const m = txt.match(/\d+\s*\/\s*(\d+)/);
+            if (m && parseInt(m[1], 10) > 10) {
+                total = parseInt(m[1], 10);
+            }
+        });
+        return total;
     }
 
     const painel = document.createElement('div');
@@ -158,6 +171,10 @@ javascript:(function(){
             return;
         }
 
+        if (novas.length === 0 && window.psbUltimaBase.length > 2) {
+            return;
+        }
+
         const atuaSet = new Set(novas.map(s => s.senha));
         const recomAnterior = window.psbUltimaBase[0]?.senha;
         let hist = JSON.parse(localStorage.getItem('psb_historico_hoje')) || [];
@@ -165,16 +182,17 @@ javascript:(function(){
         window.psbUltimaBase.forEach(ant => {
             if (!atuaSet.has(ant.senha)) {
                 const tempoEspera = (Date.now() - ant.timestampBase) / 1000;
-                const foiCorreta = (ant.senha === recomAnterior);
-                
-                hist.push({
-                    senha: ant.senha,
-                    prio: ant.prioridade,
-                    tipo: ant.tipoLabel,
-                    esperaSeg: tempoEspera,
-                    chamadaCorreta: foiCorreta,
-                    hora: new Date().toLocaleTimeString('pt-BR')
-                });
+                if (tempoEspera > 2) {
+                    const foiCorreta = (ant.senha === recomAnterior);
+                    hist.push({
+                        senha: ant.senha,
+                        prio: ant.prioridade,
+                        tipo: ant.tipoLabel,
+                        esperaSeg: tempoEspera,
+                        chamadaCorreta: foiCorreta,
+                        hora: new Date().toLocaleTimeString('pt-BR')
+                    });
+                }
             }
         });
 
@@ -195,6 +213,7 @@ javascript:(function(){
         const menuRel = document.getElementById('psb-menu-relatorio');
         const corpoRel = document.getElementById('psb-corpo-relatorio');
         const hist = JSON.parse(localStorage.getItem('psb_historico_hoje')) || [];
+        const totalSabin = obterTotalSabinOficial();
 
         menuRel.style.display = 'block';
 
@@ -207,10 +226,12 @@ javascript:(function(){
         let corretas = hist.filter(h => h.chamadaCorreta).length;
         let pctCorretas = Math.round((corretas / hist.length) * 100);
 
+        let textoTotal = totalSabin ? `${hist.length} capturadas (${totalSabin} total no Sabin)` : `${hist.length} capturadas`;
+
         corpoRel.innerHTML = `
             <div style="display:flex;flex-direction:column;gap:8px;">
                 <div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);padding:8px 10px;border-radius:8px;">
-                    <div style="color:#fca5a5;font-size:9px;font-weight:700;text-transform:uppercase;">⏱️ Maior Tempo de Espera do Dia</div>
+                    <div style="color:#fca5a5;font-size:9px;font-weight:700;text-transform:uppercase;">⏱️ Maior Tempo de Espera Real do Dia</div>
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
                         <span style="font-weight:800;font-size:14px;color:#fff;">${maisDemorada.senha} (${maisDemorada.tipo})</span>
                         <span style="font-weight:800;font-size:13px;color:#f87171;">${fmt(maisDemorada.esperaSeg)}</span>
@@ -218,11 +239,12 @@ javascript:(function(){
                 </div>
 
                 <div style="background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);padding:8px 10px;border-radius:8px;">
-                    <div style="color:#86efac;font-size:9px;font-weight:700;text-transform:uppercase;">🎯 Conformidade das Chamadas (Recomendadas)</div>
+                    <div style="color:#86efac;font-size:9px;font-weight:700;text-transform:uppercase;">🎯 Conformidade das Chamadas</div>
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-                        <span style="font-weight:800;font-size:14px;color:#fff;">${corretas} de ${hist.length} corretas</span>
+                        <span style="font-weight:800;font-size:13px;color:#fff;">${corretas} de ${hist.length} corretas</span>
                         <span style="font-weight:800;font-size:15px;color:${pctCorretas >= 80 ? '#4ade80' : '#f97316'};">${pctCorretas}%</span>
                     </div>
+                    <div style="font-size:9px;color:#a1a1aa;margin-top:2px;">Contagem do Painel: ${textoTotal}</div>
                 </div>
 
                 <div style="max-height:120px;overflow-y:auto;background:rgba(0,0,0,0.3);padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.05);margin-top:4px;">
@@ -304,7 +326,7 @@ javascript:(function(){
             Object.keys(NOMES_PRIORIDADE).forEach(p => {
                 const key = `${t}_${p}`;
                 const input = document.getElementById(`psb-cfg-${key}`);
-                if (input) SLAS[key] = parseInt(input.value) || 12;
+                if (input) SLAS[key] = parseInt(input.value, 10) || 12;
             });
         });
         localStorage.setItem('psb_slas_config', JSON.stringify(SLAS));
@@ -337,13 +359,28 @@ javascript:(function(){
             const cod = [...senhas][0];
             if (vistos.has(cod) || emAtend.has(cod)) return;
 
-            const tm = txt.match(/(\d{2}:\d{2}:\d{2})/);
+            const tm = txt.match(/(\d{2}):(\d{2}):(\d{2})/);
             if (!tm) return;
 
             vistos.add(cod);
 
-            const p = tm[1].split(':').map(Number);
-            const seg = p[0] * 3600 + p[1] * 60 + p[2];
+            const h = parseInt(tm[1], 10);
+            const m = parseInt(tm[2], 10);
+            const s = parseInt(tm[3], 10);
+            
+            let seg = 0;
+            const agora = new Date();
+            const segHoje = agora.getHours() * 3600 + agora.getMinutes() * 60 + agora.getSeconds();
+
+            if (h >= 6) {
+                const segHorario = h * 3600 + m * 60 + s;
+                seg = segHoje - segHorario;
+                if (seg < 0) seg += 86400;
+            } else {
+                seg = h * 3600 + m * 60 + s;
+            }
+
+            if (seg < 0 || seg > 28800) seg = 0;
 
             const pref = cod.replace(/\d/g, '');
             const prio = pref.slice(-1);

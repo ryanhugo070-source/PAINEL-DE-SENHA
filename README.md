@@ -1,567 +1,447 @@
-(function(){
-    if (window.psbLerInterval) clearInterval(window.psbLerInterval);
-    if (window.psbTickInterval) clearInterval(window.psbTickInterval);
-    if (window.psbIntervals && Array.isArray(window.psbIntervals)) {
-        window.psbIntervals.forEach(clearInterval);
-    }
-    window.psbIntervals = [];
+(() => {
+    if (document.getElementById('painel-senhas-sabin')) return;
 
-    const antigo = document.getElementById('painel-senhas-sabin-v2');
-    if (antigo) antigo.remove();
+    // ── SENHA DE ACESSO ──────────────────────────────────────────
+    const SENHA_ADMIN = '1234'; // Altere aqui
 
-    const hojeStr = new Date().toLocaleDateString('pt-BR');
-    if (localStorage.getItem('psb_data_hist') !== hojeStr) {
-        localStorage.setItem('psb_data_hist', hojeStr);
-        localStorage.setItem('psb_historico_hoje', JSON.stringify([]));
-    }
+    // ── TIPOS E PRIORIDADES ──────────────────────────────────────
+    const TIPOS_LABEL = { R:'Resultado', E:'Exames', P:'Pendência', A:'Agendamento', D:'Digital', V:'Vacina' };
+    const PRIOR_LABEL = { A:'80+ Alta', P:'Preferencial', G:'Geral' };
+    const TIPOS = ['R','E','P','A','D','V'];
+    const PRIORS = ['A','P','G'];
 
-    const PRIORIDADE = {
-        'A': { label: '80+ ALTA', cor: '#ef4444', icone: '🔴', bg: 'rgba(239, 68, 68, 0.15)', border: '#f87171' },
-        'P': { label: 'PREFER.', cor: '#f97316', icone: '🟠', bg: 'rgba(249, 115, 22, 0.15)', border: '#fb923c' },
-        'G': { label: 'GERAL', cor: '#38bdf8', icone: '🔵', bg: 'rgba(56, 189, 248, 0.15)', border: '#38bdf8' }
-    };
+    // ── TEMPOS PADRÃO (minutos) por combinação tipo+prioridade ───
+    const TEMPOS_PADRAO = {};
+    TIPOS.forEach(t => {
+        TEMPOS_PADRAO[t+'A'] = 5;
+        TEMPOS_PADRAO[t+'P'] = 10;
+        TEMPOS_PADRAO[t+'G'] = 15;
+    });
 
-    const NOMES_TIPOS = { 'P': 'Pendência', 'V': 'Vacina', 'R': 'Resultado', 'E': 'Exames', 'A': 'Agendamento', 'D': 'Digital' };
-    const NOMES_PRIORIDADE = { 'G': 'Geral', 'P': 'Preferencial', 'A': '80+' };
-
-    let SLAS = JSON.parse(localStorage.getItem('psb_slas_config')) || {
-        'P_G': 12, 'P_P': 12, 'P_A': 12, 'V_G': 12, 'V_P': 12, 'V_A': 12,
-        'R_G': 12, 'R_P': 12, 'R_A': 12, 'E_G': 20, 'E_P': 20, 'E_A': 20,
-        'A_G': 15, 'A_P': 15, 'A_A': 15, 'D_G': 12, 'D_P': 12, 'D_A': 12
-    };
-
-    let baseDados = [];
-    let ultimaAssinatura = '';
-    let senhasNotificadasSLA = new Set();
-    let somAtivo = true;
-
-    function tocarSomAlerta() {
-        if (!somAtivo) return;
+    function carregarTempos() {
         try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            if (!AudioContext) return;
-            const ctx = new AudioContext();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(880, ctx.currentTime);
-            osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.3);
-            gain.gain.setValueAtTime(0.2, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start();
-            osc.stop(ctx.currentTime + 0.3);
-        } catch (e) {}
+            const s = localStorage.getItem('psb_tempos');
+            return s ? {...TEMPOS_PADRAO, ...JSON.parse(s)} : {...TEMPOS_PADRAO};
+        } catch { return {...TEMPOS_PADRAO}; }
+    }
+    function salvarTempos(t) {
+        try { localStorage.setItem('psb_tempos', JSON.stringify(t)); } catch {}
     }
 
-    function obterTotalSabinOficial() {
-        let total = null;
-        Array.from(document.querySelectorAll('div, span, p')).forEach(el => {
-            if (el.children.length > 0) return;
-            const txt = (el.innerText || '').trim();
-            const m = txt.match(/\d+\s*\/\s*(\d+)/);
-            if (m && parseInt(m[1], 10) > 10) {
-                total = parseInt(m[1], 10);
-            }
-        });
-        return total;
+    let TEMPOS = carregarTempos();
+
+    // ── HISTÓRICO DE CHAMADAS ────────────────────────────────────
+    function carregarHistorico() {
+        try { return JSON.parse(localStorage.getItem('psb_historico') || '[]'); } catch { return []; }
     }
+    function salvarHistorico(h) {
+        try { localStorage.setItem('psb_historico', JSON.stringify(h.slice(-500))); } catch {} // max 500
+    }
+    let historico = carregarHistorico();
+    let ultimaRecomendada = null;
+    let baseDados = [];
 
-    const painel = document.createElement('div');
-    painel.id = 'painel-senhas-sabin-v2';
-    painel.style.cssText = "position:fixed;top:14px;right:14px;width:360px;min-width:280px;max-width:90vw;background:rgba(18, 18, 22, 0.95);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:#f4f4f5;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08);z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;overflow:hidden;resize:both;";
-
-    painel.innerHTML = `
-        <style>
-            #painel-senhas-sabin-v2 ::-webkit-scrollbar { width: 5px; }
-            #painel-senhas-sabin-v2 ::-webkit-scrollbar-track { background: transparent; }
-            #painel-senhas-sabin-v2 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
-            .psb-btn-top { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); color: #d4d4d8; border-radius: 8px; width: 28px; height: 28px; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }
-            .psb-btn-top:hover { background: rgba(255,255,255,0.15); color: #fff; }
-            .psb-card-item { transition: all 0.2s ease; }
-            .psb-card-item:hover { background: rgba(39, 39, 42, 0.8) !important; transform: translateX(2px); }
-            @keyframes psb-alerta-piscar {
-                0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); border-color: rgba(239, 68, 68, 0.9); }
-                50% { box-shadow: 0 0 12px 3px rgba(239, 68, 68, 0.4); border-color: rgba(239, 68, 68, 0.4); }
-                100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); border-color: rgba(239, 68, 68, 0.9); }
-            }
-            .psb-card-critico { animation: psb-alerta-piscar 1.2s infinite !important; background: rgba(127, 29, 29, 0.25) !important; }
-        </style>
-
-        <div style="background:rgba(255,255,255,0.03);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,0.06);user-select:none;">
-            <div style="display:flex;align-items:center;gap:8px;">
-                <span style="font-size:16px;">📊</span>
-                <span style="font-weight:700;font-size:13px;letter-spacing:0.5px;color:#f4f4f5;text-transform:uppercase;">Painel Sabin</span>
-            </div>
-            <div style="display:flex;gap:5px;">
-                <button id="psb-relatorio" class="psb-btn-top" title="Relatório do Dia">📈</button>
-                <button id="psb-som" class="psb-btn-top" title="Som">🔊</button>
-                <button id="psb-config" class="psb-btn-top" title="Configurações">⚙️</button>
-                <button id="psb-atualizar" class="psb-btn-top" title="Atualizar">↻</button>
-                <button id="psb-minimizar" class="psb-btn-top" title="Minimizar">➖</button>
-                <button id="psb-fechar" class="psb-btn-top" style="background:rgba(239,68,68,0.15);color:#ef4444;" title="Fechar">✕</button>
-            </div>
-        </div>
-
-        <div id="psb-corpo-painel">
-            <div id="psb-banner-critico" style="display:none;background:#ef4444;color:#fff;font-weight:800;font-size:11px;text-align:center;padding:6px;letter-spacing:0.5px;text-transform:uppercase;">
-                ⚠️ SENHA EM ESTADO CRÍTICO EXCEDIDA!
-            </div>
-
-            <div id="psb-menu-relatorio" style="display:none;padding:14px;background:rgba(24, 24, 27, 0.98);border-bottom:1px solid rgba(255,255,255,0.08);font-size:11px;">
-                <div style="font-weight:800;font-size:12px;color:#a7f3d0;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
-                    <span>📈 Relatório de Atendimento Hoje</span>
-                    <button id="psb-fechar-relatorio" style="background:none;border:none;color:#a1a1aa;cursor:pointer;">✕</button>
-                </div>
-                <div id="psb-corpo-relatorio"></div>
-            </div>
-
-            <div id="psb-menu-config" style="display:none;padding:14px;background:rgba(24, 24, 27, 0.95);border-bottom:1px solid rgba(255,255,255,0.08);font-size:11px;">
-                <div style="font-weight:700;margin-bottom:10px;color:#60a5fa;">⚙️ Limites SLA por Prioridade (min):</div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:180px;overflow-y:auto;" id="psb-inputs-config"></div>
-                <button id="psb-salvar-config" style="margin-top:12px;width:100%;background:#22c55e;border:none;color:#fff;padding:8px;border-radius:8px;font-weight:700;cursor:pointer;">Salvar Alterações</button>
-            </div>
-
-            <div style="padding:12px 14px;background:rgba(0,0,0,0.2);border-bottom:1px solid rgba(255,255,255,0.05);display:flex;gap:8px;">
-                <div style="flex:1;text-align:center;background:rgba(239, 68, 68, 0.08);border:1px solid rgba(239, 68, 68, 0.25);border-radius:10px;padding:8px 0;">
-                    <div style="font-size:20px;font-weight:800;color:#f87171;line-height:1;" id="psb-num-A">0</div>
-                    <div style="font-size:9px;font-weight:700;color:#fca5a5;margin-top:4px;">🔴 80+ ALTA</div>
-                </div>
-                <div style="flex:1;text-align:center;background:rgba(249, 115, 22, 0.08);border:1px solid rgba(249, 115, 22, 0.25);border-radius:10px;padding:8px 0;">
-                    <div style="font-size:20px;font-weight:800;color:#fb923c;line-height:1;" id="psb-num-P">0</div>
-                    <div style="font-size:9px;font-weight:700;color:#fdba74;margin-top:4px;">🟠 PREFER.</div>
-                </div>
-                <div style="flex:1;text-align:center;background:rgba(56, 189, 248, 0.08);border:1px solid rgba(56, 189, 248, 0.25);border-radius:10px;padding:8px 0;">
-                    <div style="font-size:20px;font-weight:800;color:#38bdf8;line-height:1;" id="psb-num-G">0</div>
-                    <div style="font-size:9px;font-weight:700;color:#7dd3fc;margin-top:4px;">🔵 GERAL</div>
-                </div>
-            </div>
-
-            <div id="psb-recomendada" style="display:none;padding:12px 14px;background:linear-gradient(135deg, rgba(34, 197, 94, 0.12), rgba(20, 83, 45, 0.25));border-bottom:1px solid rgba(34, 197, 94, 0.2);">
-                <div style="font-size:10px;color:#4ade80;font-weight:800;letter-spacing:0.8px;margin-bottom:8px;display:flex;align-items:center;gap:5px;">
-                    <span style="display:inline-block;width:6px;height:6px;background:#4ade80;border-radius:50%;box-shadow:0 0 8px #4ade80;"></span>
-                    PRÓXIMA SENHA RECOMENDADA
-                </div>
-                <div id="psb-recom-corpo"></div>
-            </div>
-
-            <div id="psb-lista" style="max-height:300px;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px;"></div>
-            
-            <div style="padding:8px 14px;text-align:center;font-size:10px;color:#a1a1aa;background:rgba(0,0,0,0.3);border-top:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;align-items:center;">
-                <span>Sabin Auto-Sync</span>
-                <span>Última busca: <strong id="psb-hora" style="color:#d4d4d8;">--</strong></span>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(painel);
-
+    // ── FORMATAR TEMPO ───────────────────────────────────────────
     function fmt(seg) {
         seg = Math.max(0, Math.floor(seg));
-        const h = Math.floor(seg / 3600);
-        const m = Math.floor((seg % 3600) / 60);
-        const s = seg % 60;
-        return [h, m, s].map(n => String(n).padStart(2, '0')).join(':');
+        const h = Math.floor(seg/3600), m = Math.floor((seg%3600)/60), s = seg%60;
+        return [h,m,s].map(n=>String(n).padStart(2,'0')).join(':');
     }
 
-    function registrarChamadas(novas) {
-        if (!window.psbUltimaBase || window.psbUltimaBase.length === 0) {
-            window.psbUltimaBase = novas;
-            return;
-        }
-
-        if (novas.length === 0 && window.psbUltimaBase.length > 2) {
-            return;
-        }
-
-        const atuaSet = new Set(novas.map(s => s.senha));
-        const recomAnterior = window.psbUltimaBase[0]?.senha;
-        let hist = JSON.parse(localStorage.getItem('psb_historico_hoje')) || [];
-
-        window.psbUltimaBase.forEach(ant => {
-            if (!atuaSet.has(ant.senha)) {
-                const tempoEspera = (Date.now() - ant.timestampBase) / 1000;
-                if (tempoEspera > 2) {
-                    const foiCorreta = (ant.senha === recomAnterior);
-                    hist.push({
-                        senha: ant.senha,
-                        prio: ant.prioridade,
-                        tipo: ant.tipoLabel,
-                        esperaSeg: tempoEspera,
-                        chamadaCorreta: foiCorreta,
-                        hora: new Date().toLocaleTimeString('pt-BR')
-                    });
-                }
-            }
-        });
-
-        localStorage.setItem('psb_historico_hoje', JSON.stringify(hist));
-        window.psbUltimaBase = novas;
+    // ── VERIFICAR SENHA ──────────────────────────────────────────
+    function verificarSenha(callback) {
+        const modal = document.createElement('div');
+        modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2147483648;display:flex;align-items:center;justify-content:center;font-family:'Segoe UI',Arial,sans-serif;`;
+        modal.innerHTML = `
+            <div style="background:#1e1e1e;border:2px solid #2d7dff;border-radius:12px;padding:24px;width:280px;text-align:center;">
+                <div style="font-size:24px;margin-bottom:8px;">🔐</div>
+                <div style="font-weight:700;color:#fff;margin-bottom:16px;">Digite a senha de acesso</div>
+                <input id="psb-senha-input" type="password" placeholder="Senha..." style="width:100%;padding:10px;border-radius:8px;border:1px solid #444;background:#2a2a2a;color:#fff;font-size:16px;text-align:center;box-sizing:border-box;margin-bottom:12px;">
+                <div style="display:flex;gap:8px;">
+                    <button id="psb-senha-cancel" style="flex:1;padding:10px;background:#444;color:#fff;border:none;border-radius:8px;cursor:pointer;">Cancelar</button>
+                    <button id="psb-senha-ok" style="flex:1;padding:10px;background:#2d7dff;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">Entrar</button>
+                </div>
+                <div id="psb-senha-erro" style="color:#e74c3c;font-size:12px;margin-top:8px;display:none;">Senha incorreta!</div>
+            </div>`;
+        document.body.appendChild(modal);
+        const inp = modal.querySelector('#psb-senha-input');
+        inp.focus();
+        modal.querySelector('#psb-senha-cancel').onclick = () => modal.remove();
+        const tentar = () => {
+            if (inp.value === SENHA_ADMIN) { modal.remove(); callback(); }
+            else { modal.querySelector('#psb-senha-erro').style.display='block'; inp.value=''; inp.focus(); }
+        };
+        modal.querySelector('#psb-senha-ok').onclick = tentar;
+        inp.addEventListener('keydown', e => { if(e.key==='Enter') tentar(); });
     }
 
-    document.getElementById('psb-relatorio').onclick = () => {
-        const password = prompt('Digite a senha para acessar o Relatório:');
-        if (password === '160405') {
-            exibirRelatorio();
-        } else if (password !== null) {
-            alert('Senha incorreta!');
-        }
-    };
+    // ── PAINEL PRINCIPAL ─────────────────────────────────────────
+    const painel = document.createElement('div');
+    painel.id = 'painel-senhas-sabin';
+    painel.style.cssText = `position:fixed;top:10px;right:10px;width:340px;background:#111;color:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.8);z-index:2147483647;font-family:'Segoe UI',Arial,sans-serif;border:1px solid #333;overflow:hidden;`;
 
-    function exibirRelatorio() {
-        const menuRel = document.getElementById('psb-menu-relatorio');
-        const corpoRel = document.getElementById('psb-corpo-relatorio');
-        const hist = JSON.parse(localStorage.getItem('psb_historico_hoje')) || [];
-        const totalSabin = obterTotalSabinOficial();
-
-        menuRel.style.display = 'block';
-
-        if (hist.length === 0) {
-            corpoRel.innerHTML = '<div style="color:#a1a1aa;text-align:center;padding:12px 0;">Nenhum atendimento finalizado registrado hoje ainda.</div>';
-            return;
-        }
-
-        let maisDemorada = hist.reduce((max, item) => item.esperaSeg > max.esperaSeg ? item : max, hist[0]);
-        let corretas = hist.filter(h => h.chamadaCorreta).length;
-        let pctCorretas = Math.round((corretas / hist.length) * 100);
-
-        let textoTotal = totalSabin ? `${hist.length} capturadas (${totalSabin} total no Sabin)` : `${hist.length} capturadas`;
-
-        corpoRel.innerHTML = `
-            <div style="display:flex;flex-direction:column;gap:8px;">
-                <div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);padding:8px 10px;border-radius:8px;">
-                    <div style="color:#fca5a5;font-size:9px;font-weight:700;text-transform:uppercase;">⏱️ Maior Tempo de Espera Real do Dia</div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-                        <span style="font-weight:800;font-size:14px;color:#fff;">${maisDemorada.senha} (${maisDemorada.tipo})</span>
-                        <span style="font-weight:800;font-size:13px;color:#f87171;">${fmt(maisDemorada.esperaSeg)}</span>
-                    </div>
-                </div>
-
-                <div style="background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.3);padding:8px 10px;border-radius:8px;">
-                    <div style="color:#86efac;font-size:9px;font-weight:700;text-transform:uppercase;">🎯 Conformidade das Chamadas</div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;">
-                        <span style="font-weight:800;font-size:13px;color:#fff;">${corretas} de ${hist.length} corretas</span>
-                        <span style="font-weight:800;font-size:15px;color:${pctCorretas >= 80 ? '#4ade80' : '#f97316'};">${pctCorretas}%</span>
-                    </div>
-                    <div style="font-size:9px;color:#a1a1aa;margin-top:2px;">Contagem do Painel: ${textoTotal}</div>
-                </div>
-
-                <div style="max-height:120px;overflow-y:auto;background:rgba(0,0,0,0.3);padding:6px;border-radius:6px;border:1px solid rgba(255,255,255,0.05);margin-top:4px;">
-                    <div style="font-size:9px;color:#71717a;margin-bottom:4px;font-weight:700;">ÚLTIMAS CHAMADAS DO DIA:</div>
-                    ${hist.slice(-10).reverse().map(h => `
-                        <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
-                            <span>${h.hora} - <strong>${h.senha}</strong></span>
-                            <span>⏱️ ${fmt(h.esperaSeg)}${h.chamadaCorreta ? '✅' : '❌ Outra'}</span>
-                        </div>
-                    `).join('')}
-                </div>
+    painel.innerHTML = `
+        <div style="background:#1a1a1a;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;">
+            <span style="font-weight:700;font-size:14px;">📋 Painel de Senhas</span>
+            <div style="display:flex;gap:5px;">
+                <button id="psb-btn-config" title="Configurações" style="background:#333;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">⚙️</button>
+                <button id="psb-btn-relatorio" title="Relatório" style="background:#333;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">📊</button>
+                <button id="psb-atualizar" title="Atualizar" style="background:#2d7dff;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">↻</button>
+                <button onclick="document.getElementById('painel-senhas-sabin').remove()" style="background:#444;border:none;color:#fff;border-radius:6px;padding:3px 7px;cursor:pointer;font-size:13px;">✕</button>
             </div>
-        `;
-    }
+        </div>
+        <div style="padding:8px 10px;background:#161616;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;">
+            <div style="flex:1;text-align:center;background:#2c0a0a;border:1px solid #e74c3c;border-radius:8px;padding:5px;">
+                <div style="font-size:18px;font-weight:700;color:#e74c3c;" id="psb-num-A">0</div>
+                <div style="font-size:9px;color:#e74c3c;">🔴 80+ALTA</div>
+            </div>
+            <div style="flex:1;text-align:center;background:#2c1a0a;border:1px solid #e67e22;border-radius:8px;padding:5px;">
+                <div style="font-size:18px;font-weight:700;color:#e67e22;" id="psb-num-P">0</div>
+                <div style="font-size:9px;color:#e67e22;">🟠 PREFER.</div>
+            </div>
+            <div style="flex:1;text-align:center;background:#1a1a1a;border:1px solid #555;border-radius:8px;padding:5px;">
+                <div style="font-size:18px;font-weight:700;color:#aaa;" id="psb-num-G">0</div>
+                <div style="font-size:9px;color:#aaa;">⚪ GERAL</div>
+            </div>
+        </div>
+        <div id="psb-recomendada" style="display:none;padding:8px 10px;background:#0a1f0a;border-bottom:1px solid #1a3a1a;">
+            <div style="font-size:9px;color:#2ecc71;font-weight:700;margin-bottom:3px;">✅ PRÓXIMA RECOMENDADA (fila justa)</div>
+            <div id="psb-recom-corpo"></div>
+        </div>
+        <div id="psb-lista" style="max-height:380px;overflow-y:auto;padding:6px;"></div>
+        <div style="padding:5px;text-align:center;font-size:9px;color:#444;border-top:1px solid #1a1a1a;">
+            Leitura: <span id="psb-hora">--</span>
+        </div>`;
+    document.body.appendChild(painel);
 
-    document.getElementById('psb-fechar-relatorio').onclick = () => {
-        document.getElementById('psb-menu-relatorio').style.display = 'none';
-    };
+    const style = document.createElement('style');
+    style.innerHTML = `@keyframes psb-pisca{0%,100%{opacity:1}50%{opacity:.4}} #psb-lista::-webkit-scrollbar{width:4px} #psb-lista::-webkit-scrollbar-thumb{background:#333;border-radius:2px}`;
+    document.head.appendChild(style);
 
-    document.getElementById('psb-som').onclick = () => {
-        somAtivo = !somAtivo;
-        const btn = document.getElementById('psb-som');
-        btn.innerText = somAtivo ? '🔊' : '🔇';
-        btn.style.opacity = somAtivo ? '1' : '0.5';
-        if (somAtivo) tocarSomAlerta();
-    };
-
-    let estaminimizado = false;
-    document.getElementById('psb-minimizar').onclick = () => {
-        const corpo = document.getElementById('psb-corpo-painel');
-        const btn = document.getElementById('psb-minimizar');
-        if (estaminimizado) {
-            corpo.style.display = 'block';
-            btn.innerText = '➖';
-            estaminimizado = false;
-        } else {
-            corpo.style.display = 'none';
-            btn.innerText = '🗖';
-            estaminimizado = true;
-        }
-    };
-
-    function renderInputsConfig() {
-        const container = document.getElementById('psb-inputs-config');
-        let html = '';
-        Object.keys(NOMES_TIPOS).forEach(t => {
-            Object.keys(NOMES_PRIORIDADE).forEach(p => {
-                const key = `${t}_${p}`;
-                const label = `${NOMES_TIPOS[t]} ${NOMES_PRIORIDADE[p]}`;
-                const val = SLAS[key] || 12;
-                html += `
-                    <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.04);padding:4px 6px;border-radius:6px;">
-                        <span style="color:#a1a1aa;font-size:9px;" title="${label}">${label}:</span>
-                        <input type="number" id="psb-cfg-${key}" value="${val}" style="width:34px;background:#09090b;border:1px solid rgba(255,255,255,0.15);color:#fff;border-radius:4px;text-align:center;font-size:9px;">
-                    </div>
-                `;
-            });
-        });
-        container.innerHTML = html;
-    }
-
-    document.getElementById('psb-config').onclick = () => {
-        const menu = document.getElementById('psb-menu-config');
-        if (menu.style.display === 'block') {
-            menu.style.display = 'none';
-            return;
-        }
-        const senha = prompt('Digite a senha para acessar as configurações:');
-        if (senha === '160405') {
-            menu.style.display = 'block';
-            renderInputsConfig();
-        } else if (senha !== null) {
-            alert('Senha incorreta!');
-        }
-    };
-
-    document.getElementById('psb-salvar-config').onclick = () => {
-        Object.keys(NOMES_TIPOS).forEach(t => {
-            Object.keys(NOMES_PRIORIDADE).forEach(p => {
-                const key = `${t}_${p}`;
-                const input = document.getElementById(`psb-cfg-${key}`);
-                if (input) SLAS[key] = parseInt(input.value, 10) || 12;
-            });
-        });
-        localStorage.setItem('psb_slas_config', JSON.stringify(SLAS));
-        document.getElementById('psb-menu-config').style.display = 'none';
-        lerSenhas(true);
-    };
-
-    function lerSenhas(forcarRedesenho = false) {
-        const emAtend = new Set();
+    // ── LER SENHAS DA TELA ───────────────────────────────────────
+    function lerSenhas() {
+        const emAtendimento = new Set();
         Array.from(document.querySelectorAll('div')).forEach(el => {
-            if (el.closest('#painel-senhas-sabin-v2')) return;
+            if (el.closest('#painel-senhas-sabin')) return;
             const txt = el.innerText || '';
             if (txt.length > 500) return;
             if (!/TEMPO DE ATENDIMENTO/i.test(txt)) return;
-            (txt.match(/[A-Z]{1,2}\d{3}/g) || []).forEach(s => emAtend.add(s));
+            (txt.match(/[A-Z]{1,2}\d{3}/g)||[]).forEach(s => emAtendimento.add(s));
         });
 
-        const IGN = /TEMPO DE ATENDIMENTO|Finalizado pelo|Concluída|Histórico/i;
+        const IGNORAR = /TEMPO DE ATENDIMENTO|Finalizado pelo|Concluída|Histórico/i;
         const vistos = new Set();
         const novas = [];
 
         Array.from(document.querySelectorAll('div,li')).forEach(el => {
-            if (el.closest('#painel-senhas-sabin-v2')) return;
+            if (el.closest('#painel-senhas-sabin')) return;
             const txt = (el.innerText || '').trim();
-            if (txt.length < 10 || txt.length > 150 || !/[A-Z]{1,2}\d{3}/.test(txt) || !/\d{2}:\d{2}:\d{2}/.test(txt) || IGN.test(txt)) return;
-
-            const senhas = new Set(txt.match(/[A-Z]{1,2}\d{3}/g) || []);
-            if (senhas.size !== 1) return;
-
-            const cod = [...senhas][0];
-            if (vistos.has(cod) || emAtend.has(cod)) return;
-
-            const tm = txt.match(/(\d{2}):(\d{2}):(\d{2})/);
-            if (!tm) return;
-
-            vistos.add(cod);
-
-            const h = parseInt(tm[1], 10);
-            const m = parseInt(tm[2], 10);
-            const s = parseInt(tm[3], 10);
-            
-            let seg = 0;
-            const agora = new Date();
-            const segHoje = agora.getHours() * 3600 + agora.getMinutes() * 60 + agora.getSeconds();
-
-            if (h >= 6) {
-                const segHorario = h * 3600 + m * 60 + s;
-                seg = segHoje - segHorario;
-                if (seg < 0) seg += 86400;
-            } else {
-                seg = h * 3600 + m * 60 + s;
-            }
-
-            if (seg < 0 || seg > 28800) seg = 0;
-
-            const pref = cod.replace(/\d/g, '');
-            const prio = pref.slice(-1);
-            if (!['A', 'P', 'G'].includes(prio)) return;
-
-            const tLetra = pref.length > 1 ? pref[0] : pref;
-            const tipoNome = NOMES_TIPOS[tLetra] || tLetra;
-            const chaveSLA = `${tLetra}_${prio}`;
-            const tempoSLA = SLAS[chaveSLA] || 12;
-
-            const ant = baseDados.find(b => b.senha === cod);
-
+            if (txt.length < 10 || txt.length > 150) return;
+            if (!/[A-Z]{1,2}\d{3}/.test(txt)) return;
+            if (!/\d{2}:\d{2}:\d{2}/.test(txt)) return;
+            if (IGNORAR.test(txt)) return;
+            const senhasNoCard = new Set((txt.match(/[A-Z]{1,2}\d{3}/g)||[]));
+            if (senhasNoCard.size !== 1) return;
+            const codSenha = [...senhasNoCard][0];
+            if (vistos.has(codSenha) || emAtendimento.has(codSenha)) return;
+            const tempoMatch = txt.match(/(\d{2}:\d{2}:\d{2})/);
+            if (!tempoMatch) return;
+            vistos.add(codSenha);
+            const partes = tempoMatch[1].split(':').map(Number);
+            const segundos = partes[0]*3600 + partes[1]*60 + partes[2];
+            const prefixo = codSenha.replace(/\d/g,'');
+            const priorLetra = prefixo.slice(-1);
+            if (!['A','P','G'].includes(priorLetra)) return;
+            const tipoLetra = prefixo.length > 1 ? prefixo[0] : prefixo;
+            const chave = tipoLetra + priorLetra;
+            const limiteMin = TEMPOS[chave] || 15;
+            const anterior = baseDados.find(b => b.senha === codSenha);
             novas.push({
-                senha: cod,
-                prioridade: prio,
-                tipoLabel: tipoNome,
-                tempoLimiteMin: tempoSLA,
-                timestampBase: ant ? ant.timestampBase : Date.now() - seg * 1000
+                senha: codSenha,
+                prioridade: priorLetra,
+                tipo: tipoLetra,
+                chave,
+                label: (TIPOS_LABEL[tipoLetra]||tipoLetra) + ' · ' + (PRIOR_LABEL[priorLetra]||priorLetra),
+                limiteMin,
+                segundosBase: anterior ? anterior.segundosBase : segundos,
+                timestampBase: anterior ? anterior.timestampBase : Date.now() - segundos*1000
             });
         });
 
-        novas.sort((a, b) => (((Date.now() - b.timestampBase) / 1000) / (b.tempoLimiteMin * 60)) * 100 - (((Date.now() - a.timestampBase) / 1000) / (a.tempoLimiteMin * 60)) * 100);
+        // Cor por prioridade
+        const COR = { A:'#e74c3c', P:'#e67e22', G:'#95a5a6' };
+        const FUNDO = { A:'#2c0a0a', P:'#2c1a0a', G:'#1a1a1a' };
+        const ICONE = { A:'🔴', P:'🟠', G:'⚪' };
 
-        registrarChamadas(novas);
-        baseDados = novas;
-
-        ['A', 'P', 'G'].forEach(p => {
-            const el = document.getElementById('psb-num-' + p);
-            if (el) el.innerText = novas.filter(s => s.prioridade === p).length;
+        // Ordena por % do limite
+        novas.sort((a,b) => {
+            const pctA = ((Date.now()-a.timestampBase)/1000) / (a.limiteMin*60) * 100;
+            const pctB = ((Date.now()-b.timestampBase)/1000) / (b.limiteMin*60) * 100;
+            return pctB - pctA;
         });
 
-        renderLista(forcarRedesenho);
-        
-        const hEl = document.getElementById('psb-hora');
-        if (hEl) hEl.innerText = new Date().toLocaleTimeString('pt-BR');
-    }
+        baseDados = novas;
+        ultimaRecomendada = novas.length > 0 ? novas[0].senha : null;
 
-    function renderLista(forcar = false) {
-        const listaEl = document.getElementById('psb-lista');
-        const recomEl = document.getElementById('psb-recomendada');
+        ['A','P','G'].forEach(p => {
+            document.getElementById(`psb-num-${p}`).innerText = novas.filter(s=>s.prioridade===p).length;
+        });
 
-        const assinaturaAtual = baseDados.map(s => s.senha).join('|');
-
-        if (!forcar && assinaturaAtual === ultimaAssinatura && baseDados.length > 0) {
-            tick();
-            return;
-        }
-
-        ultimaAssinatura = assinaturaAtual;
-
-        if (baseDados.length > 0) {
-            recomEl.style.display = 'block';
-            const top = baseDados[0];
-            const cfg = PRIORIDADE[top.prioridade];
-            const seg = (Date.now() - top.timestampBase) / 1000;
-            const pct = Math.min((seg / (top.tempoLimiteMin * 60)) * 100, 999);
-            const rb = document.getElementById('psb-recom-corpo');
-
-            if (rb) {
-                rb.innerHTML = `
-                    <div style="display:flex;align-items:center;gap:12px;">
-                        <div style="font-size:26px;">${cfg.icone}</div>
-                        <div style="flex:1;">
-                            <div style="font-weight:800;font-size:20px;color:#fff;line-height:1;">${top.senha}</div>
-                            <div style="font-size:10px;color:#a1a1aa;margin-top:4px;">${top.tipoLabel} • ${cfg.label} • <span id="psb-recom-tempo" style="font-weight:700;color:#e4e4e7;">⏱ ${fmt(seg)}</span></div>
-                        </div>
-                        <div style="text-align:right;">
-                            <div id="psb-recom-pct" style="font-size:18px;font-weight:800;color:${pct >= 100 ? '#ef4444' : '#4ade80'};">${Math.round(pct)}%</div>
-                            <div style="font-size:9px;color:#a1a1aa;text-transform:uppercase;">do limite</div>
-                        </div>
-                    </div>
-                `;
-            }
+        const lista = document.getElementById('psb-lista');
+        if (novas.length === 0) {
+            lista.innerHTML = '<div style="text-align:center;color:#444;padding:16px;font-size:12px;">Nenhuma senha na fila</div>';
+            document.getElementById('psb-recomendada').style.display = 'none';
         } else {
-            recomEl.style.display = 'none';
-        }
-
-        if (baseDados.length === 0) {
-            listaEl.innerHTML = '<div style="text-align:center;color:#71717a;padding:24px 0;font-size:12px;">Nenhuma senha aguardando na fila.</div>';
-            return;
-        }
-
-        listaEl.innerHTML = baseDados.map((s, i) => {
-            const cfg = PRIORIDADE[s.prioridade];
-            const seg = (Date.now() - s.timestampBase) / 1000;
-            const pct = Math.min((seg / (s.tempoLimiteMin * 60)) * 100, 999);
-            const urg = pct >= 100;
-
-            return `
-                <div data-senha="${s.senha}" class="psb-card-item ${urg ? 'psb-card-critico' : ''}" style="display:flex;align-items:center;gap:10px;background:rgba(30, 30, 35, 0.6);border:1px solid ${urg ? 'rgba(239, 68, 68, 0.8)' : 'rgba(255, 255, 255, 0.06)'};border-left:4px solid ${cfg.cor};border-radius:10px;padding:8px 12px;">
-                    <div style="font-size:11px;font-weight:700;color:#71717a;width:14px;">${i + 1}º</div>
+            document.getElementById('psb-recomendada').style.display = 'block';
+            lista.innerHTML = novas.map((s, idx) => {
+                const cor = COR[s.prioridade], fundo = FUNDO[s.prioridade], icone = ICONE[s.prioridade];
+                const segAtual = (Date.now()-s.timestampBase)/1000;
+                const pct = Math.min((segAtual/(s.limiteMin*60))*100, 999);
+                const urgente = pct >= 80;
+                return `<div id="psb-card-${idx}" style="display:flex;align-items:center;gap:8px;background:${fundo};border:1px solid ${cor}44;border-left:3px solid ${cor};border-radius:8px;padding:7px 9px;margin-bottom:5px;${urgente?`animation:psb-pisca 1s infinite;box-shadow:0 0 8px ${cor};`:''}">
+                    <div style="font-size:10px;color:#444;width:14px;">${idx+1}º</div>
+                    <div style="font-size:15px;">${icone}</div>
                     <div style="flex:1;">
-                        <div style="font-weight:800;font-size:14px;color:#fff;line-height:1;display:flex;align-items:center;gap:6px;">
-                            ${s.senha}
-                            <span style="font-size:9px;padding:2px 6px;border-radius:4px;background:${cfg.bg};color:${cfg.border};border:1px solid ${cfg.border}40;font-weight:700;">${cfg.label}</span>
-                        </div>
-                        <div style="font-size:10px;color:#a1a1aa;margin-top:4px;">${s.tipoLabel}</div>
+                        <div style="font-weight:700;font-size:14px;color:${cor};">${s.senha}</div>
+                        <div style="font-size:10px;color:#666;">${s.label}</div>
                     </div>
                     <div style="text-align:right;">
-                        <div class="psb-tempo-val" style="font-size:12px;color:${urg ? '#f87171' : '#d4d4d8'};font-weight:700;">⏱ ${fmt(seg)}</div>
-                        <div class="psb-pct-val" style="font-size:11px;color:${pct >= 100 ? '#ef4444' : pct >= 80 ? '#fb923c' : '#a1a1aa'};font-weight:800;margin-top:2px;">${Math.round(pct)}%</div>
+                        <div id="psb-tempo-${idx}" style="font-size:12px;color:${urgente?cor:'#aaa'};font-weight:${urgente?'700':'400'};">⏱ ${fmt(segAtual)}</div>
+                        <div id="psb-pct-${idx}" style="font-size:10px;color:${pct>=100?'#e74c3c':pct>=80?'#e67e22':'#666'};font-weight:700;">${Math.round(pct)}% / ${s.limiteMin}min</div>
                     </div>
-                </div>
-            `;
-        }).join('');
+                </div>`;
+            }).join('');
+
+            // Recomendada
+            const top = novas[0];
+            const cor = COR[top.prioridade];
+            const segTop = (Date.now()-top.timestampBase)/1000;
+            const pctTop = Math.min((segTop/(top.limiteMin*60))*100,999);
+            document.getElementById('psb-recom-corpo').innerHTML = `
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div style="font-size:20px;">${ICONE[top.prioridade]}</div>
+                    <div style="flex:1;">
+                        <div style="font-weight:700;font-size:16px;color:#fff;">${top.senha}</div>
+                        <div style="font-size:10px;color:#888;">${top.label} · <span id="psb-recom-tempo">⏱ ${fmt(segTop)}</span></div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div id="psb-recom-pct" style="font-size:15px;font-weight:700;color:${pctTop>=100?'#e74c3c':'#2ecc71'};">${Math.round(pctTop)}%</div>
+                        <div style="font-size:9px;color:#555;">de ${top.limiteMin}min</div>
+                    </div>
+                </div>`;
+        }
+        document.getElementById('psb-hora').innerText = new Date().toLocaleTimeString('pt-BR');
     }
 
+    // ── TICK SEGUNDO A SEGUNDO ───────────────────────────────────
     function tick() {
-        if (!document.getElementById('painel-senhas-sabin-v2')) return;
-
-        let existeCritica = false;
-
-        document.querySelectorAll('#psb-lista [data-senha]').forEach(card => {
-            const cod = card.getAttribute('data-senha');
-            const s = baseDados.find(item => item.senha === cod);
-            if (!s) return;
-
-            const seg = (Date.now() - s.timestampBase) / 1000;
-            const pct = Math.min((seg / (s.tempoLimiteMin * 60)) * 100, 999);
-            const urg = pct >= 100;
-
-            if (urg) {
-                existeCritica = true;
-                if (!senhasNotificadasSLA.has(cod)) {
-                    senhasNotificadasSLA.add(cod);
-                    tocarSomAlerta();
-                }
-            }
-
-            const eT = card.querySelector('.psb-tempo-val');
-            const eP = card.querySelector('.psb-pct-val');
-
-            if (eT) {
-                eT.innerText = '⏱ ' + fmt(seg);
-                eT.style.color = urg ? '#f87171' : '#d4d4d8';
-            }
-            if (eP) {
-                eP.innerText = Math.round(pct) + '%';
-                eP.style.color = pct >= 100 ? '#ef4444' : pct >= 80 ? '#fb923c' : '#a1a1aa';
-            }
-
-            if (urg) card.classList.add('psb-card-critico');
-            else card.classList.remove('psb-card-critico');
+        if (!document.getElementById('painel-senhas-sabin')) return;
+        const COR = { A:'#e74c3c', P:'#e67e22', G:'#95a5a6' };
+        baseDados.forEach((s, idx) => {
+            const segAtual = (Date.now()-s.timestampBase)/1000;
+            const pct = Math.min((segAtual/(s.limiteMin*60))*100,999);
+            const elT = document.getElementById(`psb-tempo-${idx}`);
+            const elP = document.getElementById(`psb-pct-${idx}`);
+            if (elT) elT.innerText = '⏱ ' + fmt(segAtual);
+            if (elP) { elP.innerText = Math.round(pct)+'% / '+s.limiteMin+'min'; elP.style.color = pct>=100?'#e74c3c':pct>=80?'#e67e22':'#666'; }
         });
-
-        const banner = document.getElementById('psb-banner-critico');
-        if (banner) banner.style.display = existeCritica ? 'block' : 'none';
-
         if (baseDados.length > 0) {
             const top = baseDados[0];
-            const seg = (Date.now() - top.timestampBase) / 1000;
-            const pct = Math.min((seg / (top.tempoLimiteMin * 60)) * 100, 999);
-
-            const eRT = document.getElementById('psb-recom-tempo');
-            const eRP = document.getElementById('psb-recom-pct');
-
-            if (eRT) eRT.innerText = '⏱ ' + fmt(seg);
-            if (eRP) {
-                eRP.innerText = Math.round(pct) + '%';
-                eRP.style.color = pct >= 100 ? '#ef4444' : '#4ade80';
-            }
+            const segTop = (Date.now()-top.timestampBase)/1000;
+            const pctTop = Math.min((segTop/(top.limiteMin*60))*100,999);
+            const elRT = document.getElementById('psb-recom-tempo');
+            const elRP = document.getElementById('psb-recom-pct');
+            if (elRT) elRT.innerText = '⏱ ' + fmt(segTop);
+            if (elRP) { elRP.innerText = Math.round(pctTop)+'%'; elRP.style.color = pctTop>=100?'#e74c3c':'#2ecc71'; }
         }
     }
 
-    document.getElementById('psb-atualizar').onclick = () => { lerSenhas(true); tick(); };
-    
-    document.getElementById('psb-fechar').onclick = () => {
-        clearInterval(window.psbLerInterval);
-        clearInterval(window.psbTickInterval);
-        document.getElementById('painel-senhas-sabin-v2').remove();
-    };
+    // ── REGISTRAR CHAMADA ────────────────────────────────────────
+    // Detecta quando uma nova senha é chamada e registra se foi a recomendada ou não
+    let ultimaSenhaAtendimento = null;
+    function verificarChamada() {
+        let senhaAtual = null;
+        Array.from(document.querySelectorAll('div')).forEach(el => {
+            if (el.closest('#painel-senhas-sabin')) return;
+            const txt = el.innerText || '';
+            if (txt.length > 500) return;
+            if (!/TEMPO DE ATENDIMENTO/i.test(txt)) return;
+            const m = txt.match(/([A-Z]{1,2}\d{3})/);
+            if (m) senhaAtual = m[1];
+        });
+        if (senhaAtual && senhaAtual !== ultimaSenhaAtendimento) {
+            ultimaSenhaAtendimento = senhaAtual;
+            const foiRecomendada = senhaAtual === ultimaRecomendada;
+            historico.push({
+                senha: senhaAtual,
+                recomendada: ultimaRecomendada,
+                foiRecomendada,
+                hora: new Date().toLocaleString('pt-BR')
+            });
+            salvarHistorico(historico);
+        }
+    }
 
-    lerSenhas(true);
-    tick();
+    // ── ABA CONFIGURAÇÕES ────────────────────────────────────────
+    function abrirConfig() {
+        TEMPOS = carregarTempos();
+        const modal = document.createElement('div');
+        modal.id = 'psb-modal-config';
+        modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2147483648;display:flex;align-items:center;justify-content:center;font-family:'Segoe UI',Arial,sans-serif;`;
 
-    window.psbLerInterval = setInterval(() => {
-        if (document.getElementById('painel-senhas-sabin-v2')) lerSenhas();
+        let linhas = '';
+        TIPOS.forEach(t => {
+            PRIORS.forEach(p => {
+                const chave = t+p;
+                const val = TEMPOS[chave] || 15;
+                const corP = p==='A'?'#e74c3c':p==='P'?'#e67e22':'#aaa';
+                linhas += `<tr>
+                    <td style="padding:6px 8px;color:#ccc;font-size:12px;">${TIPOS_LABEL[t]||t}</td>
+                    <td style="padding:6px 8px;color:${corP};font-size:12px;font-weight:700;">${PRIOR_LABEL[p]}</td>
+                    <td style="padding:6px 8px;">
+                        <input type="number" id="psb-cfg-${chave}" value="${val}" min="1" max="120"
+                            style="width:60px;padding:4px 6px;border-radius:6px;border:1px solid #444;background:#2a2a2a;color:#fff;font-size:13px;text-align:center;">
+                        <span style="color:#666;font-size:11px;"> min</span>
+                    </td>
+                </tr>`;
+            });
+        });
+
+        modal.innerHTML = `
+            <div style="background:#1a1a1a;border:2px solid #2d7dff;border-radius:12px;padding:20px;width:360px;max-height:85vh;overflow-y:auto;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                    <span style="font-size:16px;font-weight:700;color:#fff;">⚙️ Configurar Tempos</span>
+                    <button onclick="document.getElementById('psb-modal-config').remove()" style="background:#444;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;">✕</button>
+                </div>
+                <div style="font-size:11px;color:#666;margin-bottom:12px;">Defina o tempo limite (minutos) para cada combinação de serviço + prioridade:</div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr>
+                        <th style="text-align:left;padding:6px 8px;font-size:11px;color:#555;border-bottom:1px solid #333;">Serviço</th>
+                        <th style="text-align:left;padding:6px 8px;font-size:11px;color:#555;border-bottom:1px solid #333;">Prioridade</th>
+                        <th style="text-align:left;padding:6px 8px;font-size:11px;color:#555;border-bottom:1px solid #333;">Tempo</th>
+                    </tr></thead>
+                    <tbody>${linhas}</tbody>
+                </table>
+                <div style="display:flex;gap:8px;margin-top:16px;">
+                    <button id="psb-cfg-restaurar" style="flex:1;padding:10px;background:#333;color:#aaa;border:none;border-radius:8px;cursor:pointer;font-size:12px;">Restaurar padrão</button>
+                    <button id="psb-cfg-salvar" style="flex:1;padding:10px;background:#2d7dff;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:700;">💾 Salvar</button>
+                </div>
+                <div id="psb-cfg-ok" style="display:none;text-align:center;color:#2ecc71;font-size:12px;margin-top:8px;">✅ Salvo com sucesso!</div>
+            </div>`;
+        document.body.appendChild(modal);
+
+        document.getElementById('psb-cfg-salvar').onclick = () => {
+            const novos = {};
+            TIPOS.forEach(t => PRIORS.forEach(p => {
+                const chave = t+p;
+                const v = parseInt(document.getElementById(`psb-cfg-${chave}`)?.value) || 15;
+                novos[chave] = v;
+            }));
+            TEMPOS = novos;
+            salvarTempos(novos);
+            document.getElementById('psb-cfg-ok').style.display = 'block';
+            setTimeout(() => { document.getElementById('psb-cfg-ok').style.display='none'; }, 2000);
+            lerSenhas();
+        };
+
+        document.getElementById('psb-cfg-restaurar').onclick = () => {
+            TIPOS.forEach(t => PRIORS.forEach(p => {
+                const chave = t+p;
+                const el = document.getElementById(`psb-cfg-${chave}`);
+                if (el) el.value = TEMPOS_PADRAO[chave];
+            }));
+        };
+    }
+
+    // ── ABA RELATÓRIO ────────────────────────────────────────────
+    function abrirRelatorio() {
+        historico = carregarHistorico();
+        const modal = document.createElement('div');
+        modal.id = 'psb-modal-relatorio';
+        modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2147483648;display:flex;align-items:center;justify-content:center;font-family:'Segoe UI',Arial,sans-serif;`;
+
+        const total = historico.length;
+        const corretas = historico.filter(h=>h.foiRecomendada).length;
+        const erradas = total - corretas;
+        const pctAcerto = total > 0 ? Math.round((corretas/total)*100) : 0;
+
+        // Últimas 20 chamadas
+        const ultimas = [...historico].reverse().slice(0,20);
+        const linhas = ultimas.map(h => `
+            <tr style="border-bottom:1px solid #222;">
+                <td style="padding:5px 8px;font-size:11px;color:#ccc;">${h.hora}</td>
+                <td style="padding:5px 8px;font-size:12px;font-weight:700;color:#fff;">${h.senha}</td>
+                <td style="padding:5px 8px;font-size:11px;color:#888;">${h.recomendada||'--'}</td>
+                <td style="padding:5px 8px;font-size:12px;">${h.foiRecomendada ? '<span style="color:#2ecc71;font-weight:700;">✅ Sim</span>' : '<span style="color:#e74c3c;font-weight:700;">❌ Não</span>'}</td>
+            </tr>`).join('');
+
+        modal.innerHTML = `
+            <div style="background:#1a1a1a;border:2px solid #2d7dff;border-radius:12px;padding:20px;width:420px;max-height:85vh;overflow-y:auto;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                    <span style="font-size:16px;font-weight:700;color:#fff;">📊 Relatório de Chamadas</span>
+                    <div style="display:flex;gap:6px;">
+                        <button id="psb-rel-limpar" style="background:#8B0000;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">🗑 Limpar</button>
+                        <button onclick="document.getElementById('psb-modal-relatorio').remove()" style="background:#444;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;">✕</button>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;margin-bottom:14px;">
+                    <div style="flex:1;background:#0a2a0a;border:1px solid #2ecc71;border-radius:8px;padding:10px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#2ecc71;">${corretas}</div>
+                        <div style="font-size:10px;color:#2ecc71;">✅ Na ordem</div>
+                    </div>
+                    <div style="flex:1;background:#2c0a0a;border:1px solid #e74c3c;border-radius:8px;padding:10px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#e74c3c;">${erradas}</div>
+                        <div style="font-size:10px;color:#e74c3c;">❌ Fora da ordem</div>
+                    </div>
+                    <div style="flex:1;background:#1a1a2a;border:1px solid #2d7dff;border-radius:8px;padding:10px;text-align:center;">
+                        <div style="font-size:22px;font-weight:700;color:#2d7dff;">${pctAcerto}%</div>
+                        <div style="font-size:10px;color:#2d7dff;">🎯 Acerto</div>
+                    </div>
+                </div>
+                <div style="font-size:11px;color:#555;margin-bottom:8px;">Últimas 20 chamadas:</div>
+                <table style="width:100%;border-collapse:collapse;">
+                    <thead><tr style="border-bottom:1px solid #333;">
+                        <th style="text-align:left;padding:5px 8px;font-size:10px;color:#555;">Hora</th>
+                        <th style="text-align:left;padding:5px 8px;font-size:10px;color:#555;">Chamou</th>
+                        <th style="text-align:left;padding:5px 8px;font-size:10px;color:#555;">Recomendada</th>
+                        <th style="text-align:left;padding:5px 8px;font-size:10px;color:#555;">Correto?</th>
+                    </tr></thead>
+                    <tbody>${linhas || '<tr><td colspan="4" style="text-align:center;color:#444;padding:16px;">Nenhum registro ainda</td></tr>'}</tbody>
+                </table>
+            </div>`;
+        document.body.appendChild(modal);
+
+        document.getElementById('psb-rel-limpar').onclick = () => {
+            if (confirm('Limpar todo o histórico?')) {
+                historico = [];
+                salvarHistorico([]);
+                modal.remove();
+            }
+        };
+    }
+
+    // ── EVENTOS ───────────────────────────────────────────────────
+    document.getElementById('psb-atualizar').onclick = lerSenhas;
+    document.getElementById('psb-btn-config').onclick = () => verificarSenha(abrirConfig);
+    document.getElementById('psb-btn-relatorio').onclick = () => verificarSenha(abrirRelatorio);
+
+    // ── INICIAR ───────────────────────────────────────────────────
+    lerSenhas();
+
+    const intLer = setInterval(() => {
+        if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intLer); clearInterval(intTick); clearInterval(intChamada); return; }
+        lerSenhas();
+        verificarChamada();
     }, 5000);
 
-    window.psbTickInterval = setInterval(() => {
-        if (document.getElementById('painel-senhas-sabin-v2')) tick();
+    const intTick = setInterval(() => {
+        if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intTick); return; }
+        tick();
     }, 1000);
+
+    const intChamada = setInterval(() => {
+        if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intChamada); return; }
+        verificarChamada();
+    }, 2000);
 
 })();

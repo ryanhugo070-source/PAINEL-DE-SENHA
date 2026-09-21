@@ -2,7 +2,7 @@
     if (document.getElementById('painel-senhas-sabin')) return;
 
     // ── CONFIGURAÇÕES ─────────────────────────────────────────────
-    const SENHA_ADMIN = '1234';
+    const SENHA_ADMIN = '160405';
     const STORAGE_KEY = 'psb_historico_global'; // compartilhado entre todos os computadores no mesmo domínio
 
     const TIPOS_LABEL = { R:'Resultado', E:'Exames', P:'Pendência', A:'Agendamento', D:'Digital', V:'Vacina' };
@@ -265,9 +265,26 @@
         }
     }
 
+    // ── MONITORAR BOTÃO CHAMAR PRÓXIMA ───────────────────────────
+    // Captura a recomendada NO CLIQUE do botão, antes da senha sair da fila
+    function monitorarBotaoChamar() {
+        const botoes = Array.from(document.querySelectorAll('button, a, div[role="button"]')).filter(el => {
+            const txt = el.innerText || '';
+            return /Chamar\s*Próxima|Chamar\s*Proxima/i.test(txt);
+        });
+        botoes.forEach(btn => {
+            if (btn.dataset.psbMonitorado) return;
+            btn.dataset.psbMonitorado = '1';
+            btn.addEventListener('click', () => {
+                // Salva snapshot da recomendada no momento exato do clique
+                if (baseDados.length > 0) {
+                    recomendadaSnapshot = baseDados[0].senha;
+                }
+            }, true); // capture=true para pegar antes de qualquer outro handler
+        });
+    }
+
     // ── REGISTRAR CHAMADA ─────────────────────────────────────────
-    // recomendadaSnapshot: salva a recomendada no último momento que a fila foi lida
-    // inclui TODAS as senhas da fila (inclusive a que vai ser chamada)
     function verificarChamada() {
         let senhaAtual = null;
         Array.from(document.querySelectorAll('div')).forEach(el => {
@@ -280,7 +297,6 @@
         });
         if (senhaAtual && senhaAtual !== ultimaSenhaAtendimento) {
             ultimaSenhaAtendimento = senhaAtual;
-            // Usa o snapshot tirado ANTES da senha sair da fila
             const recomendadaAgora = recomendadaSnapshot || senhaAtual;
             const foiRecomendada = senhaAtual === recomendadaAgora;
             const historico = carregarHistorico();
@@ -293,6 +309,8 @@
                 ts: Date.now()
             });
             salvarHistorico(historico);
+            // Reseta snapshot após registrar
+            recomendadaSnapshot = baseDados.length > 0 ? baseDados[0].senha : null;
         }
     }
 

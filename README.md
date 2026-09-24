@@ -2,7 +2,7 @@
     if (document.getElementById('painel-senhas-sabin')) return;
 
     // ── CONFIGURAÇÕES ─────────────────────────────────────────────
-    const SENHA_ADMIN = '160405';
+    const SENHA_ADMIN = '1234';
     const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxYIo9jV3fZuQ2Pb9NhK_X7LmB9aRZ3C1U31Rli0EKYPFCUh6IyS-TAOpjXq0qFTwadBw/exec';
 
     const TIPOS_LABEL = { R:'Resultado', E:'Exames', P:'Pendência', A:'Agendamento', D:'Digital', V:'Vacina' };

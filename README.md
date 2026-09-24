@@ -2,8 +2,8 @@
     if (document.getElementById('painel-senhas-sabin')) return;
 
     // ── CONFIGURAÇÕES ─────────────────────────────────────────────
-    const SENHA_ADMIN = '160405';
-    const STORAGE_KEY = 'psb_historico_global'; // compartilhado entre todos os computadores no mesmo domínio
+    const SENHA_ADMIN = '1234';
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxYIo9jV3fZuQ2Pb9NhK_X7LmB9aRZ3C1U31Rli0EKYPFCUh6IyS-TAOpjXq0qFTwadBw/exec';
 
     const TIPOS_LABEL = { R:'Resultado', E:'Exames', P:'Pendência', A:'Agendamento', D:'Digital', V:'Vacina' };
     const PRIOR_LABEL = { A:'80+ Alta', P:'Preferencial', G:'Geral' };
@@ -13,36 +13,58 @@
     const FUNDO = { A:'#2c0a0a', P:'#2c1a0a', G:'#1a1a1a' };
     const ICONE = { A:'🔴', P:'🟠', G:'⚪' };
 
-    // ── TEMPOS PADRÃO ─────────────────────────────────────────────
+    // ── TEMPOS ────────────────────────────────────────────────────
     const TEMPOS_PADRAO = {};
     TIPOS.forEach(t => { TEMPOS_PADRAO[t+'A']=5; TEMPOS_PADRAO[t+'P']=10; TEMPOS_PADRAO[t+'G']=15; });
-
     function carregarTempos() {
         try { const s=localStorage.getItem('psb_tempos'); return s?{...TEMPOS_PADRAO,...JSON.parse(s)}:{...TEMPOS_PADRAO}; } catch { return {...TEMPOS_PADRAO}; }
     }
     function salvarTempos(t) { try { localStorage.setItem('psb_tempos',JSON.stringify(t)); } catch {} }
     let TEMPOS = carregarTempos();
 
-    // ── HISTÓRICO GLOBAL (compartilhado entre todos os PCs do mesmo domínio) ──
-    function carregarHistorico() {
-        try { return JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]'); } catch { return []; }
-    }
-    function salvarHistorico(h) {
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(h.slice(-1000))); } catch {}
+    // ── DATA ATUAL ────────────────────────────────────────────────
+    function dataHoje() {
+        const d = new Date();
+        return [String(d.getDate()).padStart(2,'0'), String(d.getMonth()+1).padStart(2,'0'), d.getFullYear()].join('/');
     }
 
-    // ── DETECTAR GUICHÊ ───────────────────────────────────────────
+    // ── DETECTAR GUICHÊ E UNIDADE ─────────────────────────────────
     function detectarGuiche() {
         const txt = document.body.innerText || '';
-        const m = txt.match(/Guiche\s*(\d+)/i) || txt.match(/Guich[êe]\s*#?\s*(\d+)/i) || txt.match(/Guich[êe].*?(\d+)/i);
+        const m = txt.match(/Guiche\s*(\d+)/i) || txt.match(/Guich[êe]\s*#?\s*(\d+)/i);
         return m ? 'Guiche ' + m[1] : 'Guiche ?';
     }
+    function detectarUnidade() {
+        const el = document.querySelector('[class*="unidade"],[id*="unidade"]');
+        if (el) return el.innerText?.trim() || '';
+        return sessionStorage.getItem('unidade_central') || '';
+    }
 
-    // ── FORMATAR TEMPO ────────────────────────────────────────────
+    // ── FORMATAR ──────────────────────────────────────────────────
     function fmt(seg) {
         seg = Math.max(0, Math.floor(seg));
         const h=Math.floor(seg/3600), m=Math.floor((seg%3600)/60), s=seg%60;
         return [h,m,s].map(n=>String(n).padStart(2,'0')).join(':');
+    }
+
+    // ── ENVIAR CHAMADA PARA APPS SCRIPT ──────────────────────────
+    function enviarChamada(payload) {
+        fetch(APPS_SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tipo: 'chamada', ...payload })
+        }).catch(() => {});
+    }
+
+    // ── BUSCAR RELATÓRIO DO APPS SCRIPT ──────────────────────────
+    async function buscarRelatorio(data, guiche) {
+        try {
+            const params = new URLSearchParams({ acao: 'relatorio', data: data || '', guiche: guiche || 'Todos' });
+            const r = await fetch(`${APPS_SCRIPT_URL}?${params}`);
+            const json = await r.json();
+            return json.dados || [];
+        } catch { return []; }
     }
 
     // ── VERIFICAR SENHA ───────────────────────────────────────────
@@ -75,8 +97,8 @@
     painel.id = 'painel-senhas-sabin';
     painel.style.cssText = 'position:fixed;top:10px;right:10px;width:340px;background:#111;color:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.8);z-index:2147483647;font-family:Segoe UI,Arial,sans-serif;border:1px solid #333;overflow:hidden;';
     painel.innerHTML = `
-        <div id="psb-header" style="background:#1a1a1a;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;cursor:pointer;">
-            <span style="font-weight:700;font-size:13px;">📋 Painel de Senhas · <span id="psb-guiche" style="color:#2d7dff;font-size:12px;">--</span></span>
+        <div id="psb-header" style="background:#1a1a1a;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;">
+            <span style="font-weight:700;font-size:13px;">📋 Painel · <span id="psb-guiche" style="color:#2d7dff;font-size:12px;">--</span></span>
             <div style="display:flex;gap:5px;" onclick="event.stopPropagation()">
                 <button id="psb-btn-config" title="Configurações" style="background:#333;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">⚙️</button>
                 <button id="psb-btn-relatorio" title="Relatório" style="background:#333;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">📊</button>
@@ -89,7 +111,7 @@
             <div style="padding:8px 10px;background:#161616;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;">
                 <div style="flex:1;text-align:center;background:#2c0a0a;border:1px solid #e74c3c;border-radius:8px;padding:5px;">
                     <div style="font-size:18px;font-weight:700;color:#e74c3c;" id="psb-num-A">0</div>
-                    <div style="font-size:9px;color:#e74c3c;">🔴 80+ALTA</div>
+                    <div style="font-size:9px;color:#e74c3c;">🔴 80+</div>
                 </div>
                 <div style="flex:1;text-align:center;background:#2c1a0a;border:1px solid #e67e22;border-radius:8px;padding:5px;">
                     <div style="font-size:18px;font-weight:700;color:#e67e22;" id="psb-num-P">0</div>
@@ -121,11 +143,8 @@
         minimizado = !minimizado;
         document.getElementById('psb-corpo').style.display = minimizado ? 'none' : 'block';
         document.getElementById('psb-minimizar').innerText = minimizado ? '+' : '−';
-        painel.style.borderRadius = minimizado ? '8px' : '12px';
     };
-    document.getElementById('psb-header').onclick = () => {
-        document.getElementById('psb-minimizar').click();
-    };
+    document.getElementById('psb-header').onclick = () => document.getElementById('psb-minimizar').click();
 
     // ── ESTADO ────────────────────────────────────────────────────
     let baseDados = [];
@@ -179,20 +198,18 @@
                 senha: codSenha, prioridade: priorLetra, tipo: tipoLetra, chave,
                 label: (TIPOS_LABEL[tipoLetra]||tipoLetra) + ' · ' + (PRIOR_LABEL[priorLetra]||priorLetra),
                 limiteMin,
-                segundosBase: anterior ? anterior.segundosBase : segundos,
                 timestampBase: anterior ? anterior.timestampBase : Date.now() - segundos*1000
             });
         });
 
         novas.sort((a,b) => {
-            const pA = ((Date.now()-a.timestampBase)/1000)/(a.limiteMin*60)*100;
-            const pB = ((Date.now()-b.timestampBase)/1000)/(b.limiteMin*60)*100;
-            return pB - pA;
+            const pA=((Date.now()-a.timestampBase)/1000)/(a.limiteMin*60)*100;
+            const pB=((Date.now()-b.timestampBase)/1000)/(b.limiteMin*60)*100;
+            return pB-pA;
         });
 
         baseDados = novas;
         ultimaRecomendada = novas.length > 0 ? novas[0].senha : null;
-        // Salva snapshot ANTES de qualquer chamada — inclui todas as senhas ainda na fila
         if (novas.length > 0) recomendadaSnapshot = novas[0].senha;
 
         ['A','P','G'].forEach(p => {
@@ -224,7 +241,7 @@
                 </div>`;
             }).join('');
 
-            const top = novas[0];
+            const top=novas[0];
             const segTop=(Date.now()-top.timestampBase)/1000;
             const pctTop=Math.min((segTop/(top.limiteMin*60))*100,999);
             document.getElementById('psb-recom-corpo').innerHTML = `
@@ -265,27 +282,23 @@
         }
     }
 
-    // ── MONITORAR BOTÃO CHAMAR PRÓXIMA ───────────────────────────
-    // Captura a recomendada NO CLIQUE do botão, antes da senha sair da fila
+    // ── MONITORAR BOTÃO CHAMAR ────────────────────────────────────
     function monitorarBotaoChamar() {
-        const botoes = Array.from(document.querySelectorAll('button, a, div[role="button"]')).filter(el => {
-            const txt = el.innerText || '';
-            return /Chamar\s*Próxima|Chamar\s*Proxima/i.test(txt);
-        });
+        const botoes = Array.from(document.querySelectorAll('button,a,div[role="button"]')).filter(el =>
+            /Chamar\s*Próxima|Chamar\s*Proxima/i.test(el.innerText||'')
+        );
         botoes.forEach(btn => {
             if (btn.dataset.psbMonitorado) return;
             btn.dataset.psbMonitorado = '1';
             btn.addEventListener('click', () => {
-                // Salva snapshot da recomendada no momento exato do clique
-                if (baseDados.length > 0) {
-                    recomendadaSnapshot = baseDados[0].senha;
-                }
-            }, true); // capture=true para pegar antes de qualquer outro handler
+                if (baseDados.length > 0) recomendadaSnapshot = baseDados[0].senha;
+            }, true);
         });
     }
 
-    // ── REGISTRAR CHAMADA ─────────────────────────────────────────
+    // ── VERIFICAR CHAMADA ─────────────────────────────────────────
     function verificarChamada() {
+        monitorarBotaoChamar();
         let senhaAtual = null;
         Array.from(document.querySelectorAll('div')).forEach(el => {
             if (el.closest('#painel-senhas-sabin')) return;
@@ -297,20 +310,17 @@
         });
         if (senhaAtual && senhaAtual !== ultimaSenhaAtendimento) {
             ultimaSenhaAtendimento = senhaAtual;
-            const recomendadaAgora = recomendadaSnapshot || senhaAtual;
+            const recomendadaAgora = recomendadaSnapshot || ultimaRecomendada || senhaAtual;
             const foiRecomendada = senhaAtual === recomendadaAgora;
-            const historico = carregarHistorico();
-            historico.push({
+            enviarChamada({
                 guiche: guicheAtual,
                 senha: senhaAtual,
                 recomendada: recomendadaAgora,
                 foiRecomendada,
-                hora: new Date().toLocaleString('pt-BR'),
-                ts: Date.now()
+                unidade: detectarUnidade(),
+                data: dataHoje()
             });
-            salvarHistorico(historico);
-            // Reseta snapshot após registrar
-            recomendadaSnapshot = baseDados.length > 0 ? baseDados[0].senha : null;
+            if (baseDados.length > 0) recomendadaSnapshot = baseDados[0].senha;
         }
     }
 
@@ -330,6 +340,7 @@
                 <span style="font-size:15px;font-weight:700;color:#fff;">⚙️ Configurar Tempos</span>
                 <button onclick="document.getElementById('psb-modal-config').remove()" style="background:#444;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;">✕</button>
             </div>
+            <div style="font-size:10px;color:#666;margin-bottom:10px;">Tempo limite (minutos) por tipo de serviço + prioridade:</div>
             <table style="width:100%;border-collapse:collapse;"><thead><tr>
                 <th style="text-align:left;padding:5px 8px;font-size:10px;color:#555;border-bottom:1px solid #333;">Serviço</th>
                 <th style="text-align:left;padding:5px 8px;font-size:10px;color:#555;border-bottom:1px solid #333;">Prioridade</th>
@@ -347,7 +358,7 @@
             TIPOS.forEach(t=>PRIORS.forEach(p=>{ const c=t+p; novos[c]=parseInt(document.getElementById(`psb-cfg-${c}`)?.value)||15; }));
             TEMPOS=novos; salvarTempos(novos);
             document.getElementById('psb-cfg-ok').style.display='block';
-            setTimeout(()=>{document.getElementById('psb-cfg-ok').style.display='none';},2000);
+            setTimeout(()=>{ try{document.getElementById('psb-cfg-ok').style.display='none';}catch{} },2000);
             lerSenhas();
         };
         document.getElementById('psb-cfg-restaurar').onclick = () => {
@@ -360,55 +371,71 @@
         const modal = document.createElement('div');
         modal.id = 'psb-modal-relatorio';
         modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2147483648;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;';
+        modal.innerHTML = `<div style="background:#1a1a1a;border:2px solid #2d7dff;border-radius:12px;padding:18px;width:500px;max-height:88vh;overflow-y:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <span style="font-size:15px;font-weight:700;color:#fff;">📊 Relatório de Chamadas</span>
+                <button onclick="document.getElementById('psb-modal-relatorio').remove()" style="background:#444;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;">✕</button>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                <div style="flex:1;min-width:120px;">
+                    <div style="font-size:10px;color:#666;margin-bottom:4px;">📅 Data</div>
+                    <input type="text" id="psb-filtro-data" value="${dataHoje()}" placeholder="dd/mm/aaaa"
+                        style="width:100%;padding:6px;background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                </div>
+                <div style="flex:1;min-width:120px;">
+                    <div style="font-size:10px;color:#666;margin-bottom:4px;">🖥️ Guichê</div>
+                    <input type="text" id="psb-filtro-guiche" value="Todos" placeholder="Todos ou Guiche 2"
+                        style="width:100%;padding:6px;background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;box-sizing:border-box;">
+                </div>
+                <div style="display:flex;align-items:flex-end;">
+                    <button id="psb-rel-buscar" style="padding:6px 14px;background:#2d7dff;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:700;font-size:12px;">🔍 Buscar</button>
+                </div>
+            </div>
+            <div id="psb-rel-corpo" style="text-align:center;color:#555;padding:20px;font-size:13px;">Clique em Buscar para carregar o relatório...</div>
+        </div>`;
+        document.body.appendChild(modal);
 
-        function renderRelatorio(filtroGuiche) {
-            let historico = carregarHistorico();
-            const guiches = [...new Set(historico.map(h=>h.guiche||'?'))].sort();
-            const dados = filtroGuiche === 'Todos' ? historico : historico.filter(h=>h.guiche===filtroGuiche);
-            const total=dados.length, corretas=dados.filter(h=>h.foiRecomendada).length, erradas=total-corretas;
+        async function buscarEMostrar() {
+            const corpo = document.getElementById('psb-rel-corpo');
+            corpo.innerHTML = '<div style="color:#666;padding:20px;text-align:center;">⏳ Carregando...</div>';
+            const data = document.getElementById('psb-filtro-data').value.trim();
+            const guiche = document.getElementById('psb-filtro-guiche').value.trim();
+            const dados = await buscarRelatorio(data, guiche);
+
+            if (dados.length === 0) {
+                corpo.innerHTML = '<div style="color:#444;padding:20px;text-align:center;font-size:12px;">Nenhum registro encontrado para esse filtro.</div>';
+                return;
+            }
+
+            const total=dados.length, corretas=dados.filter(d=>d.foiRecomendada).length, erradas=total-corretas;
             const pct=total>0?Math.round((corretas/total)*100):0;
 
             // Resumo por guichê
-            let resumoGuiches = '';
-            guiches.forEach(g => {
-                const d=historico.filter(h=>h.guiche===g);
-                const c=d.filter(h=>h.foiRecomendada).length, e=d.length-c;
+            const guiches=[...new Set(dados.map(d=>d.guiche||'?'))].sort();
+            let resumo='';
+            guiches.forEach(g=>{
+                const d=dados.filter(x=>x.guiche===g);
+                const c=d.filter(x=>x.foiRecomendada).length, e=d.length-c;
                 const p=d.length>0?Math.round((c/d.length)*100):0;
                 const cor=p>=80?'#2ecc71':p>=50?'#e67e22':'#e74c3c';
-                resumoGuiches+=`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#1a1a1a;border-radius:6px;margin-bottom:4px;${filtroGuiche===g?'border:1px solid #2d7dff;':'border:1px solid #2a2a2a;'}">
+                resumo+=`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;margin-bottom:4px;">
                     <div style="font-size:11px;color:#aaa;flex:1;">${g}</div>
-                    <div style="font-size:11px;color:#2ecc71;">✅${c}</div>
-                    <div style="font-size:11px;color:#e74c3c;">❌${e}</div>
+                    <div style="font-size:11px;color:#2ecc71;">✅ ${c}</div>
+                    <div style="font-size:11px;color:#e74c3c;">❌ ${e}</div>
                     <div style="font-size:12px;font-weight:700;color:${cor};">${p}%</div>
-                    <button onclick="renderRelatorio('${g}')" style="font-size:9px;padding:2px 6px;background:#2d7dff;border:none;color:#fff;border-radius:4px;cursor:pointer;">Ver</button>
                 </div>`;
             });
 
-            const ultimas=[...dados].reverse().slice(0,30);
-            const linhas=ultimas.map(h=>`<tr style="border-bottom:1px solid #1a1a1a;">
-                <td style="padding:4px 6px;font-size:10px;color:#666;">${(h.hora||'').split(',')[1]?.trim()||h.hora||'--'}</td>
-                <td style="padding:4px 6px;font-size:10px;color:#888;">${h.guiche||'?'}</td>
-                <td style="padding:4px 6px;font-size:12px;font-weight:700;color:#fff;">${h.senha}</td>
-                <td style="padding:4px 6px;font-size:11px;color:#888;">${h.recomendada||'--'}</td>
-                <td style="padding:4px 6px;">${h.foiRecomendada?'<span style="color:#2ecc71;font-weight:700;">✅</span>':'<span style="color:#e74c3c;font-weight:700;">❌</span>'}</td>
-            </tr>`).join('');
+            const linhas=[...dados].reverse().slice(0,50).map(d=>`
+                <tr style="border-bottom:1px solid #1a1a1a;">
+                    <td style="padding:4px 6px;font-size:10px;color:#666;">${d.hora||'--'}</td>
+                    <td style="padding:4px 6px;font-size:10px;color:#888;">${d.guiche||'?'}</td>
+                    <td style="padding:4px 6px;font-size:12px;font-weight:700;color:#fff;">${d.senha}</td>
+                    <td style="padding:4px 6px;font-size:11px;color:#888;">${d.recomendada||'--'}</td>
+                    <td style="padding:4px 6px;">${d.foiRecomendada?'<span style="color:#2ecc71;font-size:14px;">✅</span>':'<span style="color:#e74c3c;font-size:14px;">❌</span>'}</td>
+                </tr>`).join('');
 
-            const filtroOpts = ['Todos',...guiches].map(g=>`<option value="${g}" ${filtroGuiche===g?'selected':''}>${g}</option>`).join('');
-
-            modal.innerHTML = `<div style="background:#1a1a1a;border:2px solid #2d7dff;border-radius:12px;padding:18px;width:460px;max-height:88vh;overflow-y:auto;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <span style="font-size:15px;font-weight:700;color:#fff;">📊 Relatório de Chamadas</span>
-                    <div style="display:flex;gap:6px;">
-                        <button id="psb-rel-limpar" style="background:#8B0000;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">🗑 Limpar</button>
-                        <button onclick="document.getElementById('psb-modal-relatorio').remove()" style="background:#444;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;">✕</button>
-                    </div>
-                </div>
-
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-                    <span style="font-size:11px;color:#666;">Filtrar:</span>
-                    <select id="psb-filtro-guiche" style="padding:4px 8px;background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;">${filtroOpts}</select>
-                </div>
-
+            corpo.innerHTML = `
                 <div style="display:flex;gap:8px;margin-bottom:12px;">
                     <div style="flex:1;background:#0a2a0a;border:1px solid #2ecc71;border-radius:8px;padding:8px;text-align:center;">
                         <div style="font-size:20px;font-weight:700;color:#2ecc71;">${corretas}</div>
@@ -423,11 +450,9 @@
                         <div style="font-size:9px;color:#2d7dff;">🎯 Acerto</div>
                     </div>
                 </div>
-
-                <div style="font-size:10px;color:#555;margin-bottom:6px;font-weight:700;">POR GUICHÊ:</div>
-                ${resumoGuiches||'<div style="color:#444;font-size:11px;padding:8px;">Nenhum dado ainda</div>'}
-
-                <div style="font-size:10px;color:#555;margin:10px 0 6px;font-weight:700;">ÚLTIMAS 30 CHAMADAS ${filtroGuiche!=='Todos'?'('+filtroGuiche+')':''}:</div>
+                <div style="font-size:10px;color:#555;font-weight:700;margin-bottom:6px;">POR GUICHÊ:</div>
+                ${resumo}
+                <div style="font-size:10px;color:#555;font-weight:700;margin:10px 0 6px;">ÚLTIMAS 50 CHAMADAS:</div>
                 <table style="width:100%;border-collapse:collapse;">
                     <thead><tr style="border-bottom:1px solid #333;">
                         <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">Hora</th>
@@ -436,18 +461,12 @@
                         <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">Recomend.</th>
                         <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">OK?</th>
                     </tr></thead>
-                    <tbody>${linhas||'<tr><td colspan="5" style="text-align:center;color:#444;padding:12px;font-size:11px;">Nenhum registro ainda</td></tr>'}</tbody>
-                </table>
-            </div>`;
-
-            document.getElementById('psb-filtro-guiche').onchange = (e) => renderRelatorio(e.target.value);
-            document.getElementById('psb-rel-limpar').onclick = () => {
-                if(confirm('Limpar TODO o histórico de todos os guichês?')){ salvarHistorico([]); renderRelatorio('Todos'); }
-            };
+                    <tbody>${linhas}</tbody>
+                </table>`;
         }
 
-        document.body.appendChild(modal);
-        renderRelatorio('Todos');
+        document.getElementById('psb-rel-buscar').onclick = buscarEMostrar;
+        buscarEMostrar();
     }
 
     // ── EVENTOS ───────────────────────────────────────────────────
@@ -457,6 +476,8 @@
 
     // ── INICIAR ───────────────────────────────────────────────────
     lerSenhas();
+    monitorarBotaoChamar();
+
     const intLer = setInterval(() => {
         if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intLer); clearInterval(intTick); clearInterval(intChamada); return; }
         lerSenhas(); verificarChamada();

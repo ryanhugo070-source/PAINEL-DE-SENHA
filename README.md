@@ -122,6 +122,7 @@
     document.getElementById('psb-header').onclick=()=>document.getElementById('psb-minimizar').click();
 
     let baseDados=[], ultimaRecomendada=null, recomendadaSnapshot=null, ultimaSenhaAtendimento=null;
+    let snapshotTravado=false;
     let guicheAtual=detectarGuiche();
     document.getElementById('psb-guiche').innerText=guicheAtual;
 
@@ -179,7 +180,8 @@
 
         baseDados=novas;
         ultimaRecomendada=novas.length>0?novas[0].senha:null;
-        if(novas.length>0) recomendadaSnapshot=novas[0].senha;
+        // Só atualiza o snapshot se não estiver travado (aguardando registro de chamada)
+        if(novas.length>0&&!snapshotTravado) recomendadaSnapshot=novas[0].senha;
 
         ['A','P','G'].forEach(p=>{
             document.getElementById(`psb-num-${p}`).innerText=novas.filter(s=>s.prioridade===p).length;
@@ -272,9 +274,12 @@
             if(m)senhaAtual=m[1];
         });
         if(senhaAtual&&senhaAtual!==ultimaSenhaAtendimento){
-            ultimaSenhaAtendimento=senhaAtual;
+            // Guarda o snapshot ANTES de qualquer atualização
             const recomendadaAgora=recomendadaSnapshot||ultimaRecomendada||senhaAtual;
             const foiRecomendada=senhaAtual===recomendadaAgora;
+
+            ultimaSenhaAtendimento=senhaAtual;
+
             const historico=carregarHistorico();
             historico.push({
                 guiche:guicheAtual,
@@ -286,7 +291,9 @@
                 ts:Date.now()
             });
             salvarHistorico(historico);
-            if(baseDados.length>0)recomendadaSnapshot=baseDados[0].senha;
+
+            // Só atualiza o snapshot DEPOIS de registrar
+            if(baseDados.length>0) recomendadaSnapshot=baseDados[0].senha;
         }
     }
 

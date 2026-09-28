@@ -249,16 +249,29 @@
             const elRP=document.getElementById('psb-recom-pct');
             if(elRT)elRT.innerText='⏱ '+fmt(seg);
             if(elRP){elRP.innerText=Math.round(pct)+'%';elRP.style.color=pct>=100?'#e74c3c':'#2ecc71';}
+            // Atualiza snapshot a cada segundo se não estiver travado
+            if(!snapshotTravado) recomendadaSnapshot=top.senha;
         }
     }
 
     function monitorarBotaoChamar() {
+        // Monitora qualquer botão que possa chamar uma senha
         Array.from(document.querySelectorAll('button,a,div[role="button"]'))
-            .filter(el=>/Chamar\s*Próxima|Chamar\s*Proxima/i.test(el.innerText||''))
+            .filter(el=>{
+                const txt=el.innerText||'';
+                return /Chamar|Repetir/i.test(txt) && el.getBoundingClientRect().width>0;
+            })
             .forEach(btn=>{
                 if(btn.dataset.psbMonitorado)return;
                 btn.dataset.psbMonitorado='1';
-                btn.addEventListener('click',()=>{ if(baseDados.length>0) recomendadaSnapshot=baseDados[0].senha; },true);
+                btn.addEventListener('click',()=>{
+                    if(baseDados.length>0){
+                        recomendadaSnapshot=baseDados[0].senha;
+                        snapshotTravado=true;
+                        // Destrava após 10 segundos como segurança
+                        setTimeout(()=>{ snapshotTravado=false; },10000);
+                    }
+                },true);
             });
     }
 
@@ -292,7 +305,8 @@
             });
             salvarHistorico(historico);
 
-            // Só atualiza o snapshot DEPOIS de registrar
+            // Destrava e atualiza snapshot DEPOIS de registrar
+            snapshotTravado=false;
             if(baseDados.length>0) recomendadaSnapshot=baseDados[0].senha;
         }
     }

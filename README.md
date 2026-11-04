@@ -1,6 +1,6 @@
 (() => {
     if (document.getElementById('painel-senhas-sabin')) return;
-
+    function iniciarPainel(unidadeSelecionada) {
     const SENHA_ADMIN = '1234';
     const STORAGE_KEY = 'psb_historico_global';
 
@@ -475,4 +475,69 @@
         verificarChamada();
     },2000);
 
-})();
+    }
+        const UNIDADES = [
+      'Arniqueira',
+      'Jacarandá',
+      'Metrópole',
+      'Núcleo Bandeirante',
+      'Terraço Shopping',
+      'Vicente Pires I',
+      'Cruzeiro Center',
+      'Guará I',
+      'Guará II',
+      'Guará II - Real Mix',
+      'Vicente Pires II',
+      'Park Sul',
+      'Sudoeste 105',
+      'Águas Claras',
+      'Shopping Felicittá',
+      'SIA Center',
+      'Sudoeste 104',
+      'Sudoeste Centro Clínico',
+      'Sudoeste JK'
+    ];
+
+    const tela = document.createElement('div');
+    tela.id = 'psb-selecao-unidade';
+    tela.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#0f172a;color:white;display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;';
+
+    const caixa = document.createElement('div');
+    caixa.style.cssText = 'background:#1e293b;padding:25px;border-radius:15px;width:90%;max-width:650px;max-height:90vh;overflow:auto;box-sizing:border-box;';
+
+    const titulo = document.createElement('h2');
+    titulo.textContent = 'PAINEL DE SENHAS SABIN';
+    titulo.style.textAlign = 'center';
+
+    const subtitulo = document.createElement('p');
+    subtitulo.textContent = 'Selecione sua unidade';
+    subtitulo.style.textAlign = 'center';
+
+    const grade = document.createElement('div');
+    grade.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;';
+
+    UNIDADES.forEach(nome => {
+      const botao = document.createElement('button');
+      botao.textContent = nome;
+      botao.style.cssText = 'padding:14px;border:0;border-radius:8px;background:#2563eb;color:white;font-size:14px;cursor:pointer;';
+
+      botao.onclick = () => {
+        tela.remove();
+        iniciarPainel(nome);
+      };
+
+      grade.appendChild(botao);
+    });
+
+    const fechar = document.createElement('button');
+    fechar.textContent = 'Cancelar';
+    fechar.style.cssText = 'display:block;margin:20px auto 0;padding:10px 25px;border:0;border-radius:8px;cursor:pointer;';
+    fechar.onclick = () => tela.remove();
+
+    caixa.appendChild(titulo);
+    caixa.appendChild(subtitulo);
+    caixa.appendChild(grade);
+    caixa.appendChild(fechar);
+    tela.appendChild(caixa);
+    document.body.appendChild(tela);
+    })();

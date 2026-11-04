@@ -1,6 +1,6 @@
 (() => {
     if (document.getElementById('painel-senhas-sabin')) return;
-    function iniciarPainel(unidadeSelecionada) {
+    async function iniciarPainel(unidadeSelecionada) {
     const SENHA_ADMIN = '1234';
     const STORAGE_KEY = 'psb_historico_global';
 
@@ -15,13 +15,70 @@
     const TEMPOS_PADRAO = {};
     TIPOS.forEach(t => { TEMPOS_PADRAO[t+'A']=5; TEMPOS_PADRAO[t+'P']=10; TEMPOS_PADRAO[t+'G']=15; });
 
-    function carregarTempos() {
-        try { const s=localStorage.getItem('psb_tempos'); return s?{...TEMPOS_PADRAO,...JSON.parse(s)}:{...TEMPOS_PADRAO}; } catch { return {...TEMPOS_PADRAO}; }
-    }
-    function salvarTempos(t) { try { localStorage.setItem('psb_tempos',JSON.stringify(t)); } catch {} }
-    let TEMPOS = carregarTempos();
+    
+const SUPABASE_URL = 'https://wujxwgargixuadyhgnck.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_rkZ5MaE5lhotdn1pzVECmQ_9VCY2PpF';
 
-    function dataHoje() {
+async function consultarSupabase(caminho, opcoes = {}) {
+    const resposta = await fetch(SUPABASE_URL + '/rest/v1/' + caminho, {
+        ...opcoes,
+        headers: {
+            apikey: SUPABASE_KEY,
+            'Content-Type': 'application/json',
+            ...(opcoes.headers || {})
+        }
+    });
+
+    if (!resposta.ok) {
+        throw new Error('Erro ao conectar ao Supabase: ' + resposta.status);
+    }
+
+    return resposta.json();
+}
+
+
+    function carregarTempos() {
+        try { const s=localStorage.getItem('psb_tempos_' + unidadeSelecionada); return s?{...TEMPOS_PADRAO,...JSON.parse(s)}:{...TEMPOS_PADRAO}; } catch { return {...TEMPOS_PADRAO}; } 
+    }
+function salvarTempos(t) {
+    try {
+        localStorage.setItem('psb_tempos_' + unidadeSelecionada, JSON.stringify(t));
+    } catch {}
+}
+
+let TEMPOS = carregarTempos();
+let ID_UNIDADE = null;
+
+async function buscarUnidade() {
+    const unidades = await consultarSupabase(
+        'units?select=id,name&active=eq.true'
+    );
+
+    const unidade = unidades.find(
+        u => u.name === unidadeSelecionada
+    );
+
+    if (!unidade) {
+        throw new Error('Unidade não encontrada no Supabase.');
+    }
+
+    ID_UNIDADE = unidade.id;
+}
+async function carregarTemposSupabase() {
+    await buscarUnidade();
+
+    const dados = await consultarSupabase(
+        'unit_settings?select=tempos&unit_id=eq.' + ID_UNIDADE
+    );
+
+    if (!dados.length) {
+        throw new Error('Tempos não encontrados para esta unidade.');
+    }
+
+    TEMPOS = { ...TEMPOS_PADRAO, ...dados[0].tempos };
+}
+ 
+  function dataHoje() {
         const d=new Date();
         return [String(d.getDate()).padStart(2,'0'),String(d.getMonth()+1).padStart(2,'0'),d.getFullYear()].join('/');
     }
@@ -338,10 +395,27 @@
             <div id="psb-cfg-ok" style="display:none;text-align:center;color:#2ecc71;font-size:12px;margin-top:8px;">✅ Salvo!</div>
         </div>`;
         document.body.appendChild(modal);
-        document.getElementById('psb-cfg-salvar').onclick=()=>{
+        document.getElementById('psb-cfg-salvar').onclick=async ()=>{
+        const senha = prompt('Digite a senha da unidade para salvar os tempos:');
+if (senha === null) return;
             const novos={};
             TIPOS.forEach(t=>PRIORS.forEach(p=>{ const c=t+p; novos[c]=parseInt(document.getElementById(`psb-cfg-${c}`)?.value)||15; }));
-            TEMPOS=novos; salvarTempos(novos);
+            const resultado = await consultarSupabase('rpc/atualizar_tempos_unidade', {
+  method: 'POST',
+  body: JSON.stringify({
+    p_unit_id: ID_UNIDADE,
+    p_senha: senha,
+    p_tempos: novos
+  })
+});
+
+if (resultado !== true) {
+  alert('Senha incorreta ou não foi possível salvar os tempos.');
+  return;
+}
+
+TEMPOS = novos;
+salvarTempos(novos);
             document.getElementById('psb-cfg-ok').style.display='block';
             setTimeout(()=>{ try{document.getElementById('psb-cfg-ok').style.display='none';}catch{} },2000);
             lerSenhas();
@@ -521,11 +595,17 @@
       botao.textContent = nome;
       botao.style.cssText = 'padding:14px;border:0;border-radius:8px;background:#2563eb;color:white;font-size:14px;cursor:pointer;';
 
-      botao.onclick = () => {
-        tela.remove();
-        iniciarPainel(nome);
-      };
+      botao.onclick = async () => {
+    botao.disabled = true;
 
+    try {
+        await iniciarPainel(nome);
+        tela.remove();
+    } catch (erro) {
+        alert('Erro ao abrir a unidade: ' + erro.message);
+        botao.disabled = false;
+    }
+};
       grade.appendChild(botao);
     });
 

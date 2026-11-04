@@ -1,7 +1,6 @@
 (() => {
     if (document.getElementById('painel-senhas-sabin')) return;
     async function iniciarPainel(unidadeSelecionada) {
-    const SENHA_ADMIN = '1234';
     const STORAGE_KEY = 'psb_historico_global';
 
     const TIPOS_LABEL = { R:'Resultado', E:'Exames', P:'Pendência', A:'Agendamento', D:'Digital', V:'Vacina' };
@@ -48,6 +47,7 @@ function salvarTempos(t) {
 
 let TEMPOS = carregarTempos();
 let ID_UNIDADE = null;
+let carregandoTempos = false;
 
 async function buscarUnidade() {
     const unidades = await consultarSupabase(
@@ -76,8 +76,16 @@ async function carregarTemposSupabase() {
     }
 
     TEMPOS = { ...TEMPOS_PADRAO, ...dados[0].tempos };
+    salvarTempos(TEMPOS);
 }
  
+  try {
+      await carregarTemposSupabase();
+  } catch (erro) {
+      alert('Não foi possível carregar os tempos da unidade: ' + erro.message);
+      throw erro;
+  }
+
   function dataHoje() {
         const d=new Date();
         return [String(d.getDate()).padStart(2,'0'),String(d.getMonth()+1).padStart(2,'0'),d.getFullYear()].join('/');
@@ -119,7 +127,7 @@ async function carregarTemposSupabase() {
         const inp=modal.querySelector('#psb-si'); inp.focus();
         modal.querySelector('#psb-sc').onclick=()=>modal.remove();
         const tentar=()=>{
-            if(inp.value===SENHA_ADMIN){modal.remove();callback();}
+            if(inp.value){modal.remove();callback();}
             else{modal.querySelector('#psb-se').style.display='block';inp.value='';inp.focus();}
         };
         modal.querySelector('#psb-so').onclick=tentar;
@@ -369,7 +377,6 @@ async function carregarTemposSupabase() {
     }
 
     function abrirConfig() {
-        TEMPOS=carregarTempos();
         const modal=document.createElement('div');
         modal.id='psb-modal-config';
         modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2147483648;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;';
@@ -400,6 +407,8 @@ async function carregarTemposSupabase() {
 if (senha === null) return;
             const novos={};
             TIPOS.forEach(t=>PRIORS.forEach(p=>{ const c=t+p; novos[c]=parseInt(document.getElementById(`psb-cfg-${c}`)?.value)||15; }));
+            if (Object.values(novos).some(v => !Number.isInteger(v) || v < 1 || v > 999)) { alert('Informe tempos entre 1 e 999 minutos.'); return; }
+            try {
             const resultado = await consultarSupabase('rpc/atualizar_tempos_unidade', {
   method: 'POST',
   body: JSON.stringify({
@@ -413,6 +422,7 @@ if (resultado !== true) {
   alert('Senha incorreta ou não foi possível salvar os tempos.');
   return;
 }
+            } catch (erro) { alert('Erro ao salvar no Supabase: ' + erro.message); return; }
 
 TEMPOS = novos;
 salvarTempos(novos);
@@ -530,14 +540,32 @@ salvarTempos(novos);
     }
 
     document.getElementById('psb-atualizar').onclick=lerSenhas;
-    document.getElementById('psb-btn-config').onclick=()=>verificarSenha(abrirConfig);
-    document.getElementById('psb-btn-relatorio').onclick=()=>verificarSenha(abrirRelatorio);
+    document.getElementById('psb-btn-config').onclick=abrirConfig;
+    document.getElementById('psb-btn-relatorio').onclick=abrirRelatorio;
 
     lerSenhas();
     monitorarBotaoChamar();
 
+    const intSync=setInterval(async ()=>{
+        if (!document.getElementById('painel-senhas-sabin')) { clearInterval(intSync); return; }
+        if (carregandoTempos) return;
+        carregandoTempos = true;
+        try {
+            const dados = await consultarSupabase('unit_settings?select=tempos&unit_id=eq.' + ID_UNIDADE);
+            if (dados.length && dados[0].tempos) {
+                const novos = { ...TEMPOS_PADRAO, ...dados[0].tempos };
+                if (JSON.stringify(novos) !== JSON.stringify(TEMPOS)) {
+                    TEMPOS = novos;
+                    salvarTempos(novos);
+                    if (!document.getElementById('psb-modal-config')) lerSenhas();
+                }
+            }
+        } catch (erro) { console.warn('Sincronização dos tempos:', erro); }
+        finally { carregandoTempos = false; }
+    }, 3000);
+
     const intLer=setInterval(()=>{
-        if(!document.getElementById('painel-senhas-sabin')){clearInterval(intLer);clearInterval(intTick);clearInterval(intChamada);return;}
+        if(!document.getElementById('painel-senhas-sabin')){clearInterval(intLer);clearInterval(intTick);clearInterval(intChamada);clearInterval(intSync);return;}
         lerSenhas();verificarChamada();
     },5000);
     const intTick=setInterval(()=>{

@@ -188,6 +188,7 @@ async function carregarTemposSupabase() {
 
     let baseDados=[], ultimaRecomendada=null, recomendadaSnapshot=null, ultimaSenhaAtendimento=null;
     let snapshotTravado=false;
+    let chamadaPendente=null;
     let guicheAtual=detectarGuiche();
     document.getElementById('psb-guiche').innerText=guicheAtual;
 
@@ -332,6 +333,7 @@ async function carregarTemposSupabase() {
                 btn.addEventListener('click',()=>{
                     if(baseDados.length>0){
                         recomendadaSnapshot=baseDados[0].senha;
+                        chamadaPendente={senha:recomendadaSnapshot,ts:Date.now()};
                         snapshotTravado=true;
                         // Destrava após 10 segundos como segurança
                         setTimeout(()=>{ snapshotTravado=false; },10000);
@@ -353,7 +355,8 @@ async function carregarTemposSupabase() {
         });
         if(senhaAtual&&senhaAtual!==ultimaSenhaAtendimento){
             // Guarda o snapshot ANTES de qualquer atualização
-            const recomendadaAgora=recomendadaSnapshot||ultimaRecomendada||senhaAtual;
+            const recomendadaAgora=(chamadaPendente&&Date.now()-chamadaPendente.ts<30000?chamadaPendente.senha:null)||recomendadaSnapshot||ultimaRecomendada||senhaAtual;
+            chamadaPendente=null;
             const foiRecomendada=senhaAtual===recomendadaAgora;
 
             ultimaSenhaAtendimento=senhaAtual;

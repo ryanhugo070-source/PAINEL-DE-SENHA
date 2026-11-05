@@ -184,7 +184,53 @@ async function carregarTemposSupabase() {
         document.getElementById('psb-corpo').style.display=minimizado?'none':'block';
         document.getElementById('psb-minimizar').innerText=minimizado?'+':'−';
     };
-    document.getElementById('psb-header').onclick=()=>document.getElementById('psb-minimizar').click();
+    // Arraste pelo cabecalho para mover o painel; posicao salva neste navegador.
+    const cabecalhoPainel=document.getElementById('psb-header');
+    const chavePosicao='psb_posicao_painel';
+    const limitarPosicao=(x,y)=>({
+        x:Math.max(0,Math.min(x,Math.max(0,window.innerWidth-painel.offsetWidth))),
+        y:Math.max(0,Math.min(y,Math.max(0,window.innerHeight-45)))
+    });
+    const posicionarPainel=(x,y)=>{
+        const p=limitarPosicao(x,y);
+        painel.style.left=p.x+'px';
+        painel.style.top=p.y+'px';
+        painel.style.right='auto';
+    };
+    try {
+        const pos=JSON.parse(localStorage.getItem(chavePosicao)||'null');
+        if(pos&&Number.isFinite(pos.x)&&Number.isFinite(pos.y))posicionarPainel(pos.x,pos.y);
+    } catch {}
+    cabecalhoPainel.style.cursor='grab';
+    cabecalhoPainel.style.userSelect='none';
+    cabecalhoPainel.style.touchAction='none';
+    let arrastoPainel=null;
+    cabecalhoPainel.addEventListener('pointerdown',e=>{
+        if(e.button!==0||e.target.closest('button,a,input,select'))return;
+        const rect=painel.getBoundingClientRect();
+        arrastoPainel={id:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top};
+        cabecalhoPainel.setPointerCapture(e.pointerId);
+        cabecalhoPainel.style.cursor='grabbing';
+        e.preventDefault();
+    });
+    cabecalhoPainel.addEventListener('pointermove',e=>{
+        if(!arrastoPainel||e.pointerId!==arrastoPainel.id)return;
+        posicionarPainel(e.clientX-arrastoPainel.dx,e.clientY-arrastoPainel.dy);
+    });
+    const terminarArrasto=e=>{
+        if(!arrastoPainel||e.pointerId!==arrastoPainel.id)return;
+        arrastoPainel=null;
+        cabecalhoPainel.style.cursor='grab';
+        const rect=painel.getBoundingClientRect();
+        try{localStorage.setItem(chavePosicao,JSON.stringify({x:rect.left,y:rect.top}));}catch{}
+    };
+    cabecalhoPainel.addEventListener('pointerup',terminarArrasto);
+    cabecalhoPainel.addEventListener('pointercancel',terminarArrasto);
+    window.addEventListener('resize',()=>{
+        if(!painel.isConnected)return;
+        const rect=painel.getBoundingClientRect();
+        posicionarPainel(rect.left,rect.top);
+    });
 
     let baseDados=[], ultimaRecomendada=null, recomendadaSnapshot=null, ultimaSenhaAtendimento=null;
     let snapshotTravado=false;

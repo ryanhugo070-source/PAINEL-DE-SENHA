@@ -139,7 +139,7 @@ async function carregarTemposSupabase() {
     painel.style.cssText='position:fixed;top:10px;right:10px;width:370px;background:#0f172a;color:#f8fafc;border-radius:16px;box-shadow:0 16px 48px rgba(2,6,23,.65);z-index:2147483647;font-family:Segoe UI,Arial,sans-serif;border:1px solid #334155;overflow:hidden;';
     painel.innerHTML=`
         <div id="psb-header" style="background:linear-gradient(115deg,#0f172a,#1e40af);padding:14px 15px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;">
-            <span style="font-weight:700;font-size:13px;">✦ SABIN · <span id="psb-guiche" style="color:#2d7dff;font-size:12px;">--</span></span>
+            <span style="font-weight:700;font-size:13px;">⠿ SABIN · <span id="psb-guiche" style="color:#2d7dff;font-size:12px;">--</span></span>
             <div style="display:flex;gap:5px;" onclick="event.stopPropagation()">
                 <button id="psb-btn-config" title="Configurações" style="background:#333;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">⚙️</button>
                 <button id="psb-btn-relatorio" title="Relatório" style="background:#333;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">📊</button>
@@ -205,27 +205,41 @@ async function carregarTemposSupabase() {
     cabecalhoPainel.style.userSelect='none';
     cabecalhoPainel.style.touchAction='none';
     let arrastoPainel=null;
-    cabecalhoPainel.addEventListener('pointerdown',e=>{
+    // Eventos globais de mouse funcionam mesmo quando o cursor sai do cabecalho.
+    cabecalhoPainel.addEventListener('mousedown',e=>{
         if(e.button!==0||e.target.closest('button,a,input,select'))return;
         const rect=painel.getBoundingClientRect();
-        arrastoPainel={id:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top};
-        cabecalhoPainel.setPointerCapture(e.pointerId);
+        arrastoPainel={dx:e.clientX-rect.left,dy:e.clientY-rect.top};
         cabecalhoPainel.style.cursor='grabbing';
         e.preventDefault();
+        e.stopPropagation();
     });
-    cabecalhoPainel.addEventListener('pointermove',e=>{
-        if(!arrastoPainel||e.pointerId!==arrastoPainel.id)return;
+    document.addEventListener('mousemove',e=>{
+        if(!arrastoPainel||!painel.isConnected)return;
         posicionarPainel(e.clientX-arrastoPainel.dx,e.clientY-arrastoPainel.dy);
-    });
-    const terminarArrasto=e=>{
-        if(!arrastoPainel||e.pointerId!==arrastoPainel.id)return;
+    },true);
+    const finalizarArrasto=()=>{
+        if(!arrastoPainel)return;
         arrastoPainel=null;
         cabecalhoPainel.style.cursor='grab';
         const rect=painel.getBoundingClientRect();
         try{localStorage.setItem(chavePosicao,JSON.stringify({x:rect.left,y:rect.top}));}catch{}
     };
-    cabecalhoPainel.addEventListener('pointerup',terminarArrasto);
-    cabecalhoPainel.addEventListener('pointercancel',terminarArrasto);
+    document.addEventListener('mouseup',finalizarArrasto,true);
+    window.addEventListener('blur',finalizarArrasto);
+    // Suporte a toque sem interferir nos botoes.
+    cabecalhoPainel.addEventListener('touchstart',e=>{
+        if(e.target.closest('button,a,input,select'))return;
+        const toque=e.touches[0],rect=painel.getBoundingClientRect();
+        arrastoPainel={dx:toque.clientX-rect.left,dy:toque.clientY-rect.top};
+    },{passive:true});
+    document.addEventListener('touchmove',e=>{
+        if(!arrastoPainel||!painel.isConnected)return;
+        const toque=e.touches[0];
+        posicionarPainel(toque.clientX-arrastoPainel.dx,toque.clientY-arrastoPainel.dy);
+        e.preventDefault();
+    },{passive:false});
+    document.addEventListener('touchend',finalizarArrasto);
     window.addEventListener('resize',()=>{
         if(!painel.isConnected)return;
         const rect=painel.getBoundingClientRect();

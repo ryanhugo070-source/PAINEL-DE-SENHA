@@ -136,10 +136,10 @@ async function carregarTemposSupabase() {
 
     const painel=document.createElement('div');
     painel.id='painel-senhas-sabin';
-    painel.style.cssText='position:fixed;top:10px;right:10px;width:340px;background:#111;color:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.8);z-index:2147483647;font-family:Segoe UI,Arial,sans-serif;border:1px solid #333;overflow:hidden;';
+    painel.style.cssText='position:fixed;top:10px;right:10px;width:370px;background:#0f172a;color:#f8fafc;border-radius:16px;box-shadow:0 16px 48px rgba(2,6,23,.65);z-index:2147483647;font-family:Segoe UI,Arial,sans-serif;border:1px solid #334155;overflow:hidden;';
     painel.innerHTML=`
-        <div id="psb-header" style="background:#1a1a1a;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;">
-            <span style="font-weight:700;font-size:13px;">📋 Painel · <span id="psb-guiche" style="color:#2d7dff;font-size:12px;">--</span></span>
+        <div id="psb-header" style="background:linear-gradient(115deg,#0f172a,#1e40af);padding:14px 15px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #333;">
+            <span style="font-weight:700;font-size:13px;">✦ SABIN · <span id="psb-guiche" style="color:#2d7dff;font-size:12px;">--</span></span>
             <div style="display:flex;gap:5px;" onclick="event.stopPropagation()">
                 <button id="psb-btn-config" title="Configurações" style="background:#333;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">⚙️</button>
                 <button id="psb-btn-relatorio" title="Relatório" style="background:#333;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:13px;">📊</button>
@@ -148,7 +148,7 @@ async function carregarTemposSupabase() {
                 <button onclick="document.getElementById('painel-senhas-sabin').remove()" style="background:#444;border:none;color:#fff;border-radius:6px;padding:3px 7px;cursor:pointer;font-size:13px;">✕</button>
             </div>
         </div>
-        <div id="psb-corpo">
+        <div id="psb-corpo" style="background:#0f172a">
             <div style="padding:8px 10px;background:#161616;border-bottom:1px solid #2a2a2a;display:flex;gap:6px;">
                 <div style="flex:1;text-align:center;background:#2c0a0a;border:1px solid #e74c3c;border-radius:8px;padding:5px;">
                     <div style="font-size:18px;font-weight:700;color:#e74c3c;" id="psb-num-A">0</div>
@@ -163,16 +163,11 @@ async function carregarTemposSupabase() {
                     <div style="font-size:9px;color:#aaa;">⚪ GERAL</div>
                 </div>
             </div>
-            <div id="psb-recomendada" style="display:none;padding:8px 10px;background:#0a1f0a;border-bottom:1px solid #1a3a1a;">
+            <div id="psb-recomendada" style="display:none;padding:12px;background:#052e25;border-bottom:1px solid #166534;">
                 <div style="font-size:9px;color:#2ecc71;font-weight:700;margin-bottom:3px;">✅ PRÓXIMA RECOMENDADA</div>
                 <div id="psb-recom-corpo"></div>
             </div>
-            <div id="psb-indicadores" style="padding:10px;background:#111827;border-top:1px solid #334155;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-                <div style="padding:9px;background:#1e293b;border-radius:9px;border:1px solid #334155"><div style="font-size:10px;color:#93c5fd">⌛ Maior espera do dia</div><div id="psb-maior-espera" style="font-size:12px;margin-top:5px;color:white">Aguardando dados</div></div>
-                <div style="padding:9px;background:#1e293b;border-radius:9px;border:1px solid #334155"><div style="font-size:10px;color:#86efac">⏱ Maior atendimento do dia</div><div id="psb-maior-atendimento" style="font-size:12px;margin-top:5px;color:white">Aguardando dados</div></div>
-                <div style="grid-column:1/-1;font-size:9px;color:#94a3b8">Indicadores locais deste guichê • compartilhamento em preparação</div>
-            </div>
-            <div id="psb-lista" style="max-height:360px;overflow-y:auto;padding:6px;"></div>
+            <div id="psb-lista" style="max-height:380px;overflow-y:auto;padding:9px;"></div>
             <div style="padding:5px;text-align:center;font-size:9px;color:#444;border-top:1px solid #1a1a1a;">
                 Leitura: <span id="psb-hora">--</span>
             </div>
@@ -180,7 +175,7 @@ async function carregarTemposSupabase() {
     document.body.appendChild(painel);
 
     const style=document.createElement('style');
-    style.innerHTML=`@keyframes psb-pisca{0%,100%{opacity:1}50%{opacity:.4}} #psb-lista::-webkit-scrollbar{width:4px} #psb-lista::-webkit-scrollbar-thumb{background:#333;border-radius:2px}`;
+    style.innerHTML=`@keyframes psb-pisca{0%,100%{opacity:1}50%{opacity:.4}} #psb-lista::-webkit-scrollbar{width:5px} #psb-lista::-webkit-scrollbar-thumb{background:#475569;border-radius:6px} #painel-senhas-sabin button{transition:background .15s,transform .15s;border-radius:8px!important} #painel-senhas-sabin button:hover{filter:brightness(1.2)} #psb-lista>div{border-radius:10px!important;margin-bottom:5px} #psb-recomendada{box-shadow:inset 3px 0 #22c55e}`;
     document.head.appendChild(style);
 
     let minimizado=false;
@@ -194,36 +189,6 @@ async function carregarTemposSupabase() {
     let baseDados=[], ultimaRecomendada=null, recomendadaSnapshot=null, ultimaSenhaAtendimento=null;
     let snapshotTravado=false;
     let chamadaPendente=null;
-    const chaveIndicadores='psb_indicadores_'+unidadeSelecionada+'_'+detectarGuiche();
-    let indicadoresDia={data:dataHoje(),maiorEspera:null,maiorAtendimento:null};
-    try { const salvo=JSON.parse(localStorage.getItem(chaveIndicadores)||'null'); if(salvo&&salvo.data===dataHoje())indicadoresDia=salvo; } catch {}
-    let atendimentoMedido=null;
-    function atualizarIndicadores(){
-        if(indicadoresDia.data!==dataHoje())indicadoresDia={data:dataHoje(),maiorEspera:null,maiorAtendimento:null};
-        const mostrar=(id,d)=>{const el=document.getElementById(id);if(el)el.textContent=d?d.senha+' • '+fmt(d.segundos)+' • '+d.guiche:'Aguardando dados';};
-        mostrar('psb-maior-espera',indicadoresDia.maiorEspera);
-        mostrar('psb-maior-atendimento',indicadoresDia.maiorAtendimento);
-        try{localStorage.setItem(chaveIndicadores,JSON.stringify(indicadoresDia));}catch{}
-    }
-    function registrarRecorde(tipo,senha,segundos){
-        if(!Number.isFinite(segundos)||segundos<0||segundos>86400)return;
-        if(indicadoresDia.data!==dataHoje())indicadoresDia={data:dataHoje(),maiorEspera:null,maiorAtendimento:null};
-        const campo=tipo==='espera'?'maiorEspera':'maiorAtendimento';
-        if(!indicadoresDia[campo]||segundos>indicadoresDia[campo].segundos){
-            indicadoresDia[campo]={senha,segundos:Math.round(segundos),guiche:guicheAtual};
-            atualizarIndicadores();
-        }
-    }
-    function verificarConclusao(){
-        if(!atendimentoMedido)return;
-        const senha=atendimentoMedido.senha;
-        const textos=Array.from(document.querySelectorAll('div,li')).filter(el=>!el.closest('#painel-senhas-sabin')).map(el=>(el.innerText||'').trim()).filter(t=>t.length<350&&t.includes(senha));
-        const concluido=textos.some(t=>/Conclu[ií]d[ao]|Finalizado pelo/i.test(t));
-        if(concluido){
-            registrarRecorde('atendimento',senha,(Date.now()-atendimentoMedido.inicio)/1000);
-            atendimentoMedido=null;
-        }
-    }
     let guicheAtual=detectarGuiche();
     document.getElementById('psb-guiche').innerText=guicheAtual;
 
@@ -379,7 +344,6 @@ async function carregarTemposSupabase() {
 
     function verificarChamada() {
         monitorarBotaoChamar();
-        verificarConclusao();
         let senhaAtual=null;
         Array.from(document.querySelectorAll('div')).forEach(el=>{
             if(el.closest('#painel-senhas-sabin'))return;
@@ -395,11 +359,6 @@ async function carregarTemposSupabase() {
             chamadaPendente=null;
             const foiRecomendada=senhaAtual===recomendadaAgora;
 
-            // O tempo de espera vem do contador visível na fila antes da chamada.
-            const naFila=baseDados.find(x=>x.senha===senhaAtual);
-            if(naFila)registrarRecorde('espera',senhaAtual,(Date.now()-naFila.timestampBase)/1000);
-            if(atendimentoMedido&&atendimentoMedido.senha!==senhaAtual)atendimentoMedido=null;
-            if(!atendimentoMedido)atendimentoMedido={senha:senhaAtual,inicio:Date.now()};
             ultimaSenhaAtendimento=senhaAtual;
 
             const historico=carregarHistorico();
@@ -554,7 +513,6 @@ salvarTempos(novos);
     document.getElementById('psb-btn-relatorio').onclick=abrirRelatorio;
 
     lerSenhas();
-    atualizarIndicadores();
     monitorarBotaoChamar();
 
     const intSync=setInterval(async ()=>{
@@ -577,7 +535,7 @@ salvarTempos(novos);
 
     const intLer=setInterval(()=>{
         if(!document.getElementById('painel-senhas-sabin')){clearInterval(intLer);clearInterval(intTick);clearInterval(intChamada);clearInterval(intSync);return;}
-        lerSenhas();verificarChamada();atualizarIndicadores();
+        lerSenhas();verificarChamada();
     },5000);
     const intTick=setInterval(()=>{
         if(!document.getElementById('painel-senhas-sabin')){clearInterval(intTick);return;}

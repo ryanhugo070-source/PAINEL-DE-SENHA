@@ -369,6 +369,17 @@ async function carregarTemposSupabase() {
                 ts:Date.now()
             });
             salvarHistorico(historico);
+            // Registra no banco compartilhado; uma falha não interrompe o atendimento.
+            consultarSupabase('rpc/registrar_chamada', {
+                method:'POST',
+                body:JSON.stringify({
+                    p_unit_id:ID_UNIDADE,
+                    p_guiche:guicheAtual,
+                    p_senha_chamada:senhaAtual,
+                    p_senha_recomendada:recomendadaAgora
+                })
+            }).then(ok=>{if(ok!==true)console.warn('Registro de chamada recusado pelo servidor');})
+              .catch(err=>console.warn('Não foi possível registrar a chamada no Supabase:',err));
 
             // Destrava e atualiza snapshot DEPOIS de registrar
             snapshotTravado=false;
@@ -435,108 +446,63 @@ salvarTempos(novos);
         };
     }
 
-    function abrirRelatorio() {
+    async function abrirRelatorio() {
+        if(document.getElementById('psb-modal-relatorio'))return;
+        const senha=prompt('Senha para consultar o Relatório de Supervisão:');
+        if(!senha)return;
         const modal=document.createElement('div');
         modal.id='psb-modal-relatorio';
-        modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:2147483648;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;';
-
-        function renderRelatorio(filtroData, filtroGuiche) {
-            const historico=carregarHistorico();
-            const datas=[...new Set(historico.map(h=>h.data||'').filter(Boolean))].sort().reverse();
-            const guiches=[...new Set(historico.map(h=>h.guiche||'?'))].sort();
-
-            const dados=historico.filter(h=>{
-                if(filtroData&&filtroData!=='Todas'&&h.data!==filtroData)return false;
-                if(filtroGuiche&&filtroGuiche!=='Todos'&&h.guiche!==filtroGuiche)return false;
-                return true;
-            });
-
-            const total=dados.length, corretas=dados.filter(d=>d.foiRecomendada).length, erradas=total-corretas;
-            const pct=total>0?Math.round((corretas/total)*100):0;
-
-            const opsDatas=['Todas',...datas].map(d=>`<option value="${d}" ${filtroData===d?'selected':''}>${d}</option>`).join('');
-            const opsGuiches=['Todos',...guiches].map(g=>`<option value="${g}" ${filtroGuiche===g?'selected':''}>${g}</option>`).join('');
-
-            let resumo='';
-            guiches.forEach(g=>{
-                const d=dados.filter(x=>x.guiche===g);
-                const c=d.filter(x=>x.foiRecomendada).length,e=d.length-c;
-                const p=d.length>0?Math.round((c/d.length)*100):0;
-                const cor=p>=80?'#2ecc71':p>=50?'#e67e22':'#e74c3c';
-                resumo+=`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:6px;margin-bottom:4px;">
-                    <div style="font-size:11px;color:#aaa;flex:1;">${g}</div>
-                    <div style="font-size:11px;color:#2ecc71;">✅ ${c}</div>
-                    <div style="font-size:11px;color:#e74c3c;">❌ ${e}</div>
-                    <div style="font-size:12px;font-weight:700;color:${cor};">${p}%</div>
-                </div>`;
-            });
-
-            const linhas=[...dados].reverse().slice(0,50).map(d=>`
-                <tr style="border-bottom:1px solid #1a1a1a;">
-                    <td style="padding:4px 6px;font-size:10px;color:#555;">${d.data||'--'}</td>
-                    <td style="padding:4px 6px;font-size:10px;color:#666;">${(d.hora||'').split(',')[1]?.trim()||'--'}</td>
-                    <td style="padding:4px 6px;font-size:10px;color:#888;">${d.guiche||'?'}</td>
-                    <td style="padding:4px 6px;font-size:12px;font-weight:700;color:#fff;">${d.senha}</td>
-                    <td style="padding:4px 6px;font-size:11px;color:#888;">${d.recomendada||'--'}</td>
-                    <td style="padding:4px 6px;">${d.foiRecomendada?'<span style="color:#2ecc71;font-size:14px;">✅</span>':'<span style="color:#e74c3c;font-size:14px;">❌</span>'}</td>
-                </tr>`).join('');
-
-            modal.innerHTML=`<div style="background:#1a1a1a;border:2px solid #2d7dff;border-radius:12px;padding:18px;width:520px;max-height:88vh;overflow-y:auto;">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                    <span style="font-size:15px;font-weight:700;color:#fff;">📊 Relatório de Chamadas</span>
-                    <div style="display:flex;gap:6px;">
-                        <button id="psb-rel-limpar" style="background:#8B0000;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:11px;">🗑 Limpar</button>
-                        <button onclick="document.getElementById('psb-modal-relatorio').remove()" style="background:#444;border:none;color:#fff;border-radius:6px;padding:3px 8px;cursor:pointer;">✕</button>
-                    </div>
-                </div>
-                <div style="display:flex;gap:8px;margin-bottom:12px;">
-                    <div style="flex:1;">
-                        <div style="font-size:10px;color:#666;margin-bottom:4px;">📅 Data</div>
-                        <select id="psb-filtro-data" style="width:100%;padding:6px;background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;">${opsDatas}</select>
-                    </div>
-                    <div style="flex:1;">
-                        <div style="font-size:10px;color:#666;margin-bottom:4px;">🖥️ Guichê</div>
-                        <select id="psb-filtro-guiche" style="width:100%;padding:6px;background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:6px;font-size:12px;">${opsGuiches}</select>
-                    </div>
-                </div>
-                <div style="display:flex;gap:8px;margin-bottom:12px;">
-                    <div style="flex:1;background:#0a2a0a;border:1px solid #2ecc71;border-radius:8px;padding:8px;text-align:center;">
-                        <div style="font-size:20px;font-weight:700;color:#2ecc71;">${corretas}</div>
-                        <div style="font-size:9px;color:#2ecc71;">✅ Na ordem</div>
-                    </div>
-                    <div style="flex:1;background:#2c0a0a;border:1px solid #e74c3c;border-radius:8px;padding:8px;text-align:center;">
-                        <div style="font-size:20px;font-weight:700;color:#e74c3c;">${erradas}</div>
-                        <div style="font-size:9px;color:#e74c3c;">❌ Fora da ordem</div>
-                    </div>
-                    <div style="flex:1;background:#1a1a2a;border:1px solid #2d7dff;border-radius:8px;padding:8px;text-align:center;">
-                        <div style="font-size:20px;font-weight:700;color:#2d7dff;">${pct}%</div>
-                        <div style="font-size:9px;color:#2d7dff;">🎯 Acerto</div>
-                    </div>
-                </div>
-                ${resumo?`<div style="font-size:10px;color:#555;font-weight:700;margin-bottom:6px;">POR GUICHÊ:</div>${resumo}`:''}
-                <div style="font-size:10px;color:#555;font-weight:700;margin:10px 0 6px;">ÚLTIMAS 50 CHAMADAS:</div>
-                <table style="width:100%;border-collapse:collapse;">
-                    <thead><tr style="border-bottom:1px solid #333;">
-                        <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">Data</th>
-                        <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">Hora</th>
-                        <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">Guichê</th>
-                        <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">Chamou</th>
-                        <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">Recomend.</th>
-                        <th style="text-align:left;padding:4px 6px;font-size:9px;color:#555;">OK?</th>
-                    </tr></thead>
-                    <tbody>${linhas||'<tr><td colspan="6" style="text-align:center;color:#444;padding:12px;font-size:11px;">Nenhum registro ainda</td></tr>'}</tbody>
-                </table>
-            </div>`;
-
-            document.getElementById('psb-filtro-data').onchange=e=>renderRelatorio(e.target.value, document.getElementById('psb-filtro-guiche').value);
-            document.getElementById('psb-filtro-guiche').onchange=e=>renderRelatorio(document.getElementById('psb-filtro-data').value, e.target.value);
-            document.getElementById('psb-rel-limpar').onclick=()=>{
-                if(confirm('Limpar todo o histórico?')){ salvarHistorico([]); renderRelatorio('Todas','Todos'); }
-            };
-        }
-
+        modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:2147483648;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;';
+        const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        const hoje=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
+        let unidades=[], unidadeId=ID_UNIDADE, data=hoje(), guiche='Todos', registros=[];
+        const css='padding:7px;background:#292929;color:white;border:1px solid #555;border-radius:6px;max-width:100%;';
+        modal.innerHTML='<div style="background:#191919;color:white;border:2px solid #2d7dff;border-radius:12px;padding:18px;width:760px;max-width:95vw;max-height:88vh;overflow:auto"><div style="display:flex;justify-content:space-between;gap:10px"><b>📊 Relatório de Supervisão</b><button id="psb-rel-fechar">✕</button></div><div id="psb-rel-corpo" style="margin-top:15px">Carregando...</div></div>';
         document.body.appendChild(modal);
-        renderRelatorio(dataHoje(),'Todos');
+        modal.querySelector('#psb-rel-fechar').onclick=()=>modal.remove();
+        const corpo=modal.querySelector('#psb-rel-corpo');
+        function mostrar() {
+            const guiches=[...new Set(registros.map(r=>r.guiche))].sort((x,y)=>x.localeCompare(y,'pt-BR',{numeric:true}));
+            if(guiche!=='Todos'&&!guiches.includes(guiche))guiche='Todos';
+            const dados=registros.filter(r=>guiche==='Todos'||r.guiche===guiche);
+            const corretas=dados.filter(r=>r.chamada_correta).length, total=dados.length;
+            const grupos=guiches.filter(g=>guiche==='Todos'||g===guiche).map(g=>{
+                const linhas=registros.filter(r=>r.guiche===g), c=linhas.filter(r=>r.chamada_correta).length;
+                return '<tr><td>'+esc(g)+'</td><td>'+c+'</td><td>'+(linhas.length-c)+'</td><td>'+(linhas.length?Math.round(c/linhas.length*100):0)+'%</td></tr>';
+            }).join('');
+            const detalhes=dados.slice(0,300).map(r=>{
+                const hora=new Date(r.chamada_em).toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'});
+                return '<tr><td>'+esc(hora)+'</td><td>'+esc(r.guiche)+'</td><td>'+esc(r.senha_chamada)+'</td><td>'+esc(r.senha_recomendada)+'</td><td>'+(r.chamada_correta?'✅':'❌')+'</td></tr>';
+            }).join('');
+            corpo.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+                '<label>Unidade<br><select id="psb-rel-unidade" style="'+css+'">'+unidades.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===unidadeId?'selected':'')+'>'+esc(u.name)+'</option>').join('')+'</select></label>'+
+                '<label>Data<br><input id="psb-rel-data" type="date" value="'+esc(data)+'" style="'+css+'"></label>'+
+                '<label>Guichê<br><select id="psb-rel-guiche" style="'+css+'">'+['Todos',...guiches].map(g=>'<option '+(g===guiche?'selected':'')+'>'+esc(g)+'</option>').join('')+'</select></label>'+
+                '<button id="psb-rel-atualizar" style="'+css+';cursor:pointer;align-self:end">Atualizar</button></div>'+
+                '<div style="margin-bottom:12px">✅ Na ordem: <b>'+corretas+'</b> &nbsp; ❌ Fora da ordem: <b>'+(total-corretas)+'</b> &nbsp; 🎯 Acerto: <b>'+(total?Math.round(corretas/total*100):0)+'%</b></div>'+
+                '<div style="font-size:12px;color:#aaa;margin-bottom:8px">Resumo por guichê</div><table style="width:100%;text-align:left;margin-bottom:15px"><thead><tr><th>Guichê</th><th>Corretas</th><th>Fora da ordem</th><th>Acerto</th></tr></thead><tbody>'+ (linhas||'<tr><td colspan="4">Nenhuma chamada nesta data</td></tr>')+'</tbody></table>'+
+                '<div style="font-size:12px;color:#aaa;margin-bottom:8px">Chamadas (até 300 registros exibidos)</div><table style="width:100%;text-align:left"><thead><tr><th>Hora</th><th>Guichê</th><th>Chamou</th><th>Recomendada</th><th>OK?</th></tr></thead><tbody>'+(detalhes||'<tr><td colspan="5">Nenhuma chamada nesta data</td></tr>')+'</tbody></table>';
+            corpo.querySelector('#psb-rel-unidade').onchange=e=>{unidadeId=e.target.value;guiche='Todos';buscar();};
+            corpo.querySelector('#psb-rel-data').onchange=e=>{data=e.target.value;guiche='Todos';buscar();};
+            corpo.querySelector('#psb-rel-guiche').onchange=e=>{guiche=e.target.value;mostrar();};
+            corpo.querySelector('#psb-rel-atualizar').onclick=buscar;
+        }
+        async function buscar(){
+            corpo.textContent='Consultando registros...';
+            try {
+                const resposta=await consultarSupabase('rpc/consultar_relatorio_chamadas',{
+                    method:'POST',body:JSON.stringify({p_senha:senha,p_unit_id:unidadeId,p_data:data})
+                });
+                registros=Array.isArray(resposta)?resposta:[];
+                if(modal.isConnected)mostrar();
+            } catch(e) {
+                if(modal.isConnected)corpo.textContent='Não foi possível consultar. Confira a senha e a configuração do Supabase. '+e.message;
+            }
+        }
+        try {
+            unidades=await consultarSupabase('units?select=id,name&active=eq.true&order=name.asc');
+            await buscar();
+        } catch(e){corpo.textContent='Erro ao carregar unidades: '+e.message;}
     }
 
     document.getElementById('psb-atualizar').onclick=lerSenhas;

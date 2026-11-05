@@ -167,6 +167,11 @@ async function carregarTemposSupabase() {
                 <div style="font-size:9px;color:#2ecc71;font-weight:700;margin-bottom:3px;">✅ PRÓXIMA RECOMENDADA</div>
                 <div id="psb-recom-corpo"></div>
             </div>
+            <div id="psb-indicadores" style="padding:10px;background:#111827;border-top:1px solid #334155;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                <div style="padding:9px;background:#1e293b;border-radius:9px;border:1px solid #334155"><div style="font-size:10px;color:#93c5fd">⌛ Maior espera do dia</div><div id="psb-maior-espera" style="font-size:12px;margin-top:5px;color:white">Aguardando dados</div></div>
+                <div style="padding:9px;background:#1e293b;border-radius:9px;border:1px solid #334155"><div style="font-size:10px;color:#86efac">⏱ Maior atendimento do dia</div><div id="psb-maior-atendimento" style="font-size:12px;margin-top:5px;color:white">Aguardando dados</div></div>
+                <div style="grid-column:1/-1;font-size:9px;color:#94a3b8">Indicadores locais deste guichê • compartilhamento em preparação</div>
+            </div>
             <div id="psb-lista" style="max-height:360px;overflow-y:auto;padding:6px;"></div>
             <div style="padding:5px;text-align:center;font-size:9px;color:#444;border-top:1px solid #1a1a1a;">
                 Leitura: <span id="psb-hora">--</span>
@@ -189,6 +194,36 @@ async function carregarTemposSupabase() {
     let baseDados=[], ultimaRecomendada=null, recomendadaSnapshot=null, ultimaSenhaAtendimento=null;
     let snapshotTravado=false;
     let chamadaPendente=null;
+    const chaveIndicadores='psb_indicadores_'+unidadeSelecionada+'_'+detectarGuiche();
+    let indicadoresDia={data:dataHoje(),maiorEspera:null,maiorAtendimento:null};
+    try { const salvo=JSON.parse(localStorage.getItem(chaveIndicadores)||'null'); if(salvo&&salvo.data===dataHoje())indicadoresDia=salvo; } catch {}
+    let atendimentoMedido=null;
+    function atualizarIndicadores(){
+        if(indicadoresDia.data!==dataHoje())indicadoresDia={data:dataHoje(),maiorEspera:null,maiorAtendimento:null};
+        const mostrar=(id,d)=>{const el=document.getElementById(id);if(el)el.textContent=d?d.senha+' • '+fmt(d.segundos)+' • '+d.guiche:'Aguardando dados';};
+        mostrar('psb-maior-espera',indicadoresDia.maiorEspera);
+        mostrar('psb-maior-atendimento',indicadoresDia.maiorAtendimento);
+        try{localStorage.setItem(chaveIndicadores,JSON.stringify(indicadoresDia));}catch{}
+    }
+    function registrarRecorde(tipo,senha,segundos){
+        if(!Number.isFinite(segundos)||segundos<0||segundos>86400)return;
+        if(indicadoresDia.data!==dataHoje())indicadoresDia={data:dataHoje(),maiorEspera:null,maiorAtendimento:null};
+        const campo=tipo==='espera'?'maiorEspera':'maiorAtendimento';
+        if(!indicadoresDia[campo]||segundos>indicadoresDia[campo].segundos){
+            indicadoresDia[campo]={senha,segundos:Math.round(segundos),guiche:guicheAtual};
+            atualizarIndicadores();
+        }
+    }
+    function verificarConclusao(){
+        if(!atendimentoMedido)return;
+        const senha=atendimentoMedido.senha;
+        const textos=Array.from(document.querySelectorAll('div,li')).filter(el=>!el.closest('#painel-senhas-sabin')).map(el=>(el.innerText||'').trim()).filter(t=>t.length<350&&t.includes(senha));
+        const concluido=textos.some(t=>/Conclu[ií]d[ao]|Finalizado pelo/i.test(t));
+        if(concluido){
+            registrarRecorde('atendimento',senha,(Date.now()-atendimentoMedido.inicio)/1000);
+            atendimentoMedido=null;
+        }
+    }
     let guicheAtual=detectarGuiche();
     document.getElementById('psb-guiche').innerText=guicheAtual;
 
@@ -344,6 +379,7 @@ async function carregarTemposSupabase() {
 
     function verificarChamada() {
         monitorarBotaoChamar();
+        verificarConclusao();
         let senhaAtual=null;
         Array.from(document.querySelectorAll('div')).forEach(el=>{
             if(el.closest('#painel-senhas-sabin'))return;
@@ -359,6 +395,11 @@ async function carregarTemposSupabase() {
             chamadaPendente=null;
             const foiRecomendada=senhaAtual===recomendadaAgora;
 
+            // O tempo de espera vem do contador visível na fila antes da chamada.
+            const naFila=baseDados.find(x=>x.senha===senhaAtual);
+            if(naFila)registrarRecorde('espera',senhaAtual,(Date.now()-naFila.timestampBase)/1000);
+            if(atendimentoMedido&&atendimentoMedido.senha!==senhaAtual)atendimentoMedido=null;
+            if(!atendimentoMedido)atendimentoMedido={senha:senhaAtual,inicio:Date.now()};
             ultimaSenhaAtendimento=senhaAtual;
 
             const historico=carregarHistorico();
@@ -513,6 +554,7 @@ salvarTempos(novos);
     document.getElementById('psb-btn-relatorio').onclick=abrirRelatorio;
 
     lerSenhas();
+    atualizarIndicadores();
     monitorarBotaoChamar();
 
     const intSync=setInterval(async ()=>{
@@ -535,7 +577,7 @@ salvarTempos(novos);
 
     const intLer=setInterval(()=>{
         if(!document.getElementById('painel-senhas-sabin')){clearInterval(intLer);clearInterval(intTick);clearInterval(intChamada);clearInterval(intSync);return;}
-        lerSenhas();verificarChamada();
+        lerSenhas();verificarChamada();atualizarIndicadores();
     },5000);
     const intTick=setInterval(()=>{
         if(!document.getElementById('painel-senhas-sabin')){clearInterval(intTick);return;}

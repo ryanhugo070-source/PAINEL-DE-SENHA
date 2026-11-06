@@ -289,19 +289,21 @@ async function carregarTemposSupabase() {
             const tipoLetra=prefixo.length>1?prefixo[0]:prefixo;
             const chave=tipoLetra+priorLetra;
             const limiteMin=TEMPOS[chave]||15;
-            const anterior=baseDados.find(b=>b.senha===codSenha);
+            // Recalcular a partir do contador atual do Sabin a cada leitura.
+            // Reaproveitar timestamp antigo fazia uma senha mais nova ultrapassar
+            // outra da mesma categoria apos atrasos, pausas ou recarregamentos.
             novas.push({
                 senha:codSenha, prioridade:priorLetra, tipo:tipoLetra, chave,
                 label:(TIPOS_LABEL[tipoLetra]||tipoLetra)+' · '+(PRIOR_LABEL[priorLetra]||priorLetra),
                 limiteMin,
-                timestampBase:anterior?anterior.timestampBase:Date.now()-segundos*1000
+                timestampBase:Date.now()-segundos*1000
             });
         });
 
         novas.sort((a,b)=>{
             const pA=((Date.now()-a.timestampBase)/1000)/(a.limiteMin*60)*100;
             const pB=((Date.now()-b.timestampBase)/1000)/(b.limiteMin*60)*100;
-            return pB-pA;
+            return pB-pA || (a.chave===b.chave ? a.timestampBase-b.timestampBase : 0);
         });
 
         baseDados=novas;

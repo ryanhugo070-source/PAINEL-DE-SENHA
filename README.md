@@ -381,23 +381,29 @@ async function carregarTemposSupabase() {
     }
 
     function monitorarBotaoChamar() {
-        // Monitora qualquer botão que possa chamar uma senha
+        // Congela a recomendacao exibida no instante da acao, nao a fila posterior.
         Array.from(document.querySelectorAll('button,a,div[role="button"]'))
             .filter(el=>{
-                const txt=el.innerText||'';
-                return /Chamar|Repetir/i.test(txt) && el.getBoundingClientRect().width>0;
+                if(el.closest('#painel-senhas-sabin'))return false;
+                const txt=(el.innerText||'').trim();
+                return /^(?:Chamar|Chamar Pr[oó]xima|Pr[oó]xima Senha|Repetir Chamada)$/i.test(txt) && el.getBoundingClientRect().width>0;
             })
             .forEach(btn=>{
                 if(btn.dataset.psbMonitorado)return;
                 btn.dataset.psbMonitorado='1';
                 btn.addEventListener('click',()=>{
-                    if(baseDados.length>0){
-                        recomendadaSnapshot=baseDados[0].senha;
-                        chamadaPendente={senha:recomendadaSnapshot,ts:Date.now()};
-                        snapshotTravado=true;
-                        // Destrava após 10 segundos como segurança
-                        setTimeout(()=>{ snapshotTravado=false; },10000);
-                    }
+                    // Repetir chamada nao e uma nova senha.
+                    if(/Repetir/i.test(btn.innerText||''))return;
+                    const recomendadaVisivel=document.querySelector('#psb-recom-corpo');
+                    const matchVisivel=(recomendadaVisivel?.innerText||'').match(/\b[A-Z]{1,2}\d{3}\b/);
+                    const recomendadaNoClique=matchVisivel?.[0]||baseDados[0]?.senha||null;
+                    if(!recomendadaNoClique)return;
+                    chamadaPendente={senha:recomendadaNoClique,ts:Date.now()};
+                    recomendadaSnapshot=recomendadaNoClique;
+                    snapshotTravado=true;
+                    setTimeout(()=>{
+                        if(!chamadaPendente||Date.now()-chamadaPendente.ts>=30000)snapshotTravado=false;
+                    },30000);
                 },true);
             });
     }

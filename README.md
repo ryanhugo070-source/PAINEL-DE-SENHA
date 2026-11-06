@@ -535,37 +535,45 @@ salvarTempos(novos);
         modal.querySelector('#psb-rel-fechar').onclick=()=>modal.remove();
         const corpo=modal.querySelector('#psb-rel-corpo');
         function mostrar() {
-            const guiches=[...new Set(registros.map(r=>r.guiche))].sort((x,y)=>x.localeCompare(y,'pt-BR',{numeric:true}));
+            const guiches=[...new Set(registros.map(r=>r.guiche).filter(Boolean))].sort((x,y)=>x.localeCompare(y,'pt-BR',{numeric:true}));
             if(guiche!=='Todos'&&!guiches.includes(guiche))guiche='Todos';
-            const registrosUnicos=[], ultimos=new Map();
+            const dados=registros.filter(r=>guiche==='Todos'||r.guiche===guiche)
+                .sort((a,b)=>new Date(b.chamada_em)-new Date(a.chamada_em));
+            const contagem=new Map();
+            const possiveisDuplicatas=new Set();
             for(const r of [...registros].sort((a,b)=>new Date(a.chamada_em)-new Date(b.chamada_em))){
                 const chave=String(r.guiche)+'|'+String(r.senha_chamada);
                 const instante=new Date(r.chamada_em).getTime();
-                if(Number.isFinite(instante)&&ultimos.has(chave)&&instante-ultimos.get(chave)<60000)continue;
-                ultimos.set(chave,instante);
-                registrosUnicos.push(r);
+                if(Number.isFinite(instante)&&contagem.has(chave)&&instante-contagem.get(chave)<60000){
+                    possiveisDuplicatas.add(r.id||chave+'|'+instante);
+                }
+                contagem.set(chave,instante);
             }
-            registrosUnicos.reverse();
-            const duplicadas=registros.length-registrosUnicos.length;
-            const dados=registrosUnicos.filter(r=>guiche==='Todos'||r.guiche===guiche);
-            const corretas=dados.filter(r=>r.chamada_correta).length, total=dados.length;
+            const duplicadas=dados.filter(r=>possiveisDuplicatas.has(r.id||String(r.guiche)+'|'+String(r.senha_chamada)+'|'+new Date(r.chamada_em).getTime())).length;
             const grupos=guiches.filter(g=>guiche==='Todos'||g===guiche).map(g=>{
-                const linhas=registrosUnicos.filter(r=>r.guiche===g), c=linhas.filter(r=>r.chamada_correta).length;
-                return '<tr><td>'+esc(g)+'</td><td>'+c+'</td><td>'+(linhas.length-c)+'</td><td>'+(linhas.length?Math.round(c/linhas.length*100):0)+'%</td></tr>';
+                const n=dados.filter(r=>r.guiche===g).length;
+                return '<tr><td>'+esc(g)+'</td><td>'+n+'</td><td>Não auditado</td></tr>';
             }).join('');
             const detalhes=dados.slice(0,300).map(r=>{
                 const hora=new Date(r.chamada_em).toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'});
-                return '<tr><td>'+esc(hora)+'</td><td>'+esc(r.guiche)+'</td><td>'+esc(r.senha_chamada)+'</td><td>'+esc(r.senha_recomendada)+'</td><td>'+(r.chamada_correta?'✅':'❌')+'</td></tr>';
+                const duplicado=possiveisDuplicatas.has(r.id||String(r.guiche)+'|'+String(r.senha_chamada)+'|'+new Date(r.chamada_em).getTime());
+                return '<tr><td>'+esc(hora)+'</td><td>'+esc(r.guiche)+'</td><td><b>'+esc(r.senha_chamada)+'</b></td><td>'+esc(r.senha_recomendada)+'</td><td>'+(duplicado?'Possível duplicata':'Não verificado')+'</td></tr>';
             }).join('');
-            corpo.innerHTML='<div style="padding:9px 11px;margin-bottom:12px;background:#3b2d12;border:1px solid #a16207;border-radius:8px;color:#fde68a;font-size:12px">⚠️ AUDITORIA SUSPENSA: os percentuais abaixo são históricos e NÃO são confiáveis. Novas chamadas não serão pontuadas até validar a captura da recomendação. '+duplicadas+' possível(is) chamada(s) duplicada(s) ocultada(s) nesta visualização. Não use este percentual para avaliar funcionários sem auditoria.</div>'+ 
-'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+            corpo.innerHTML='<div style="padding:12px;margin-bottom:14px;background:#422006;border:1px solid #d97706;border-radius:10px;color:#fef3c7;font-size:13px"><b>⚠️ AUDITORIA EM MANUTENÇÃO</b><div style="margin-top:5px">As recomendações históricas podem estar incorretas. Acertos, erros e percentuais foram ocultados para evitar avaliações injustas. A versão atual do painel não envia novas avaliações; computadores com código antigo ainda podem enviar.</div></div>'+
+                '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
                 '<label>Unidade<br><select id="psb-rel-unidade" style="'+css+'">'+unidades.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===unidadeId?'selected':'')+'>'+esc(u.name)+'</option>').join('')+'</select></label>'+
                 '<label>Data<br><input id="psb-rel-data" type="date" value="'+esc(data)+'" style="'+css+'"></label>'+
                 '<label>Guichê<br><select id="psb-rel-guiche" style="'+css+'">'+['Todos',...guiches].map(g=>'<option '+(g===guiche?'selected':'')+'>'+esc(g)+'</option>').join('')+'</select></label>'+
                 '<button id="psb-rel-atualizar" style="'+css+';cursor:pointer;align-self:end">Atualizar</button></div>'+
-                '<div style="margin-bottom:12px">✅ Na ordem: <b>'+corretas+'</b> &nbsp; ❌ Fora da ordem: <b>'+(total-corretas)+'</b> &nbsp; 🎯 Acerto: <b>'+(total?Math.round(corretas/total*100):0)+'%</b></div>'+
-                '<div style="font-size:12px;color:#aaa;margin-bottom:8px">Resumo por guichê</div><table style="width:100%;text-align:left;margin-bottom:15px"><thead><tr><th>Guichê</th><th>Corretas</th><th>Fora da ordem</th><th>Acerto</th></tr></thead><tbody>'+ (grupos||'<tr><td colspan="4">Nenhuma chamada nesta data</td></tr>')+'</tbody></table>'+
-                '<div style="font-size:12px;color:#aaa;margin-bottom:8px">Chamadas (até 300 registros exibidos)</div><table style="width:100%;text-align:left"><thead><tr><th>Hora</th><th>Guichê</th><th>Chamou</th><th>Recomendada</th><th>OK?</th></tr></thead><tbody>'+(detalhes||'<tr><td colspan="5">Nenhuma chamada nesta data</td></tr>')+'</tbody></table>';
+                '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+                '<div style="background:#1e293b;padding:12px;border-radius:9px;flex:1">Registros históricos<br><b style="font-size:22px">'+dados.length+'</b></div>'+
+                '<div style="background:#1e293b;padding:12px;border-radius:9px;flex:1">Possíveis duplicatas<br><b style="font-size:22px">'+duplicadas+'</b></div>'+
+                '<div style="background:#1e293b;padding:12px;border-radius:9px;flex:1">Precisão da auditoria<br><b style="font-size:16px">Não verificada</b></div></div>'+
+                '<div style="font-size:12px;color:#cbd5e1;margin-bottom:8px">Registros por guichê (não equivalem a chamadas validadas)</div>'+
+                '<table style="width:100%;text-align:left;margin-bottom:15px"><thead><tr><th>Guichê</th><th>Registros</th><th>Situação</th></tr></thead><tbody>'+(grupos||'<tr><td colspan="3">Nenhum registro nesta data</td></tr>')+'</tbody></table>'+
+                '<div style="font-size:12px;color:#cbd5e1;margin-bottom:8px">Histórico para conferência (até 300 linhas, sem excluir possíveis duplicatas)</div>'+
+                '<table style="width:100%;text-align:left"><thead><tr><th>Hora</th><th>Guichê</th><th>Chamou</th><th>Recomendação registrada*</th><th>Validação</th></tr></thead><tbody>'+(detalhes||'<tr><td colspan="5">Nenhum registro nesta data</td></tr>')+'</tbody></table>'+
+                '<div style="font-size:11px;color:#94a3b8;margin-top:10px">*Recomendação registrada pelo código antigo; pode não corresponder à exibida no instante da chamada. Possível duplicata é apenas um alerta, não uma exclusão.</div>';
             corpo.querySelector('#psb-rel-unidade').onchange=e=>{unidadeId=e.target.value;guiche='Todos';buscar();};
             corpo.querySelector('#psb-rel-data').onchange=e=>{data=e.target.value;guiche='Todos';buscar();};
             corpo.querySelector('#psb-rel-guiche').onchange=e=>{guiche=e.target.value;mostrar();};

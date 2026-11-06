@@ -388,7 +388,7 @@ async function carregarTemposSupabase() {
         Array.from(document.querySelectorAll('button,a,div[role="button"]'))
             .filter(el=>{
                 if(el.closest('#painel-senhas-sabin'))return false;
-                const txt=(el.innerText||'').trim().replace(/\\s+/g,' ');
+                const txt=(el.innerText||'').trim().replace(/\s+/g,' ');
                 return /Chamar Pr[oó]xima|Chamar Senha|^Chamar$|^Pr[oó]xima Senha$|Repetir Chamada/i.test(txt)
                     && el.getBoundingClientRect().width>0;
             }).forEach(btn=>{

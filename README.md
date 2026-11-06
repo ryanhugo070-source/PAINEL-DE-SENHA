@@ -447,28 +447,12 @@ async function carregarTemposSupabase() {
             chamadasRecentes.set(chaveChamada,Date.now());
             for(const [chave,instante] of chamadasRecentes){if(Date.now()-instante>180000)chamadasRecentes.delete(chave);}
 
-            const historico=carregarHistorico();
-            historico.push({
-                guiche:guicheAtual,
-                senha:senhaAtual,
-                recomendada:recomendadaAgora,
-                foiRecomendada,
-                hora:new Date().toLocaleString('pt-BR'),
-                data:dataHoje(),
-                ts:Date.now()
+            // Auditoria suspensa: o DOM nao comprova que a recomendacao
+            // capturada foi a exibida ao atendente no momento da chamada.
+            // Nao enviar comparacoes potencialmente falsas ao Supabase.
+            console.info('[Painel Sabin] Chamada detectada; classificacao suspensa ate validacao:',{
+                guiche:guicheAtual,senhaChamada:senhaAtual,recomendacaoCapturada:recomendadaAgora
             });
-            salvarHistorico(historico);
-            // Registra no banco compartilhado; uma falha não interrompe o atendimento.
-            consultarSupabase('rpc/registrar_chamada', {
-                method:'POST',
-                body:JSON.stringify({
-                    p_unit_id:ID_UNIDADE,
-                    p_guiche:guicheAtual,
-                    p_senha_chamada:senhaAtual,
-                    p_senha_recomendada:recomendadaAgora
-                })
-            }).then(ok=>{if(ok!==true)console.warn('Registro de chamada recusado pelo servidor');})
-              .catch(err=>console.warn('Não foi possível registrar a chamada no Supabase:',err));
 
             // Destrava e atualiza snapshot DEPOIS de registrar
             snapshotTravado=false;
@@ -573,7 +557,7 @@ salvarTempos(novos);
                 const hora=new Date(r.chamada_em).toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'});
                 return '<tr><td>'+esc(hora)+'</td><td>'+esc(r.guiche)+'</td><td>'+esc(r.senha_chamada)+'</td><td>'+esc(r.senha_recomendada)+'</td><td>'+(r.chamada_correta?'✅':'❌')+'</td></tr>';
             }).join('');
-            corpo.innerHTML='<div style="padding:9px 11px;margin-bottom:12px;background:#3b2d12;border:1px solid #a16207;border-radius:8px;color:#fde68a;font-size:12px">⚠️ Resultado provisório: registros antigos podem conter recomendações incorretas. '+duplicadas+' possível(is) chamada(s) duplicada(s) ocultada(s) nesta visualização. Não use este percentual para avaliar funcionários sem auditoria.</div>'+ 
+            corpo.innerHTML='<div style="padding:9px 11px;margin-bottom:12px;background:#3b2d12;border:1px solid #a16207;border-radius:8px;color:#fde68a;font-size:12px">⚠️ AUDITORIA SUSPENSA: os percentuais abaixo são históricos e NÃO são confiáveis. Novas chamadas não serão pontuadas até validar a captura da recomendação. '+duplicadas+' possível(is) chamada(s) duplicada(s) ocultada(s) nesta visualização. Não use este percentual para avaliar funcionários sem auditoria.</div>'+ 
 '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
                 '<label>Unidade<br><select id="psb-rel-unidade" style="'+css+'">'+unidades.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===unidadeId?'selected':'')+'>'+esc(u.name)+'</option>').join('')+'</select></label>'+
                 '<label>Data<br><input id="psb-rel-data" type="date" value="'+esc(data)+'" style="'+css+'"></label>'+

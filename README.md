@@ -249,6 +249,7 @@ async function carregarTemposSupabase() {
     let baseDados=[], ultimaRecomendada=null, recomendadaSnapshot=null, ultimaSenhaAtendimento=null;
     let snapshotTravado=false;
     let chamadaPendente=null;
+    const chamadasRecentes=new Map();
     let guicheAtual=detectarGuiche();
     document.getElementById('psb-guiche').innerText=guicheAtual;
 
@@ -423,6 +424,9 @@ async function carregarTemposSupabase() {
             const m=txt.match(/([A-Z]{1,2}\d{3})/);
             if(m)senhaAtual=m[1];
         });
+        if(!senhaAtual){ultimaSenhaAtendimento=null;return;}
+        const chaveChamada=guicheAtual+'|'+senhaAtual;
+        if(chamadasRecentes.has(chaveChamada)&&Date.now()-chamadasRecentes.get(chaveChamada)<90000){ultimaSenhaAtendimento=senhaAtual;return;}
         if(senhaAtual&&senhaAtual!==ultimaSenhaAtendimento){
             // Guarda o snapshot ANTES de qualquer atualização
             const pendenteValida=chamadaPendente&&Date.now()-chamadaPendente.ts<30000;
@@ -438,6 +442,8 @@ async function carregarTemposSupabase() {
             const foiRecomendada=senhaAtual===recomendadaAgora;
 
             ultimaSenhaAtendimento=senhaAtual;
+            chamadasRecentes.set(chaveChamada,Date.now());
+            for(const [chave,instante] of chamadasRecentes){if(Date.now()-instante>180000)chamadasRecentes.delete(chave);}
 
             const historico=carregarHistorico();
             historico.push({
@@ -545,17 +551,28 @@ salvarTempos(novos);
         function mostrar() {
             const guiches=[...new Set(registros.map(r=>r.guiche))].sort((x,y)=>x.localeCompare(y,'pt-BR',{numeric:true}));
             if(guiche!=='Todos'&&!guiches.includes(guiche))guiche='Todos';
-            const dados=registros.filter(r=>guiche==='Todos'||r.guiche===guiche);
+            const registrosUnicos=[], ultimos=new Map();
+            for(const r of [...registros].sort((a,b)=>new Date(a.chamada_em)-new Date(b.chamada_em))){
+                const chave=String(r.guiche)+'|'+String(r.senha_chamada);
+                const instante=new Date(r.chamada_em).getTime();
+                if(Number.isFinite(instante)&&ultimos.has(chave)&&instante-ultimos.get(chave)<60000)continue;
+                ultimos.set(chave,instante);
+                registrosUnicos.push(r);
+            }
+            registrosUnicos.reverse();
+            const duplicadas=registros.length-registrosUnicos.length;
+            const dados=registrosUnicos.filter(r=>guiche==='Todos'||r.guiche===guiche);
             const corretas=dados.filter(r=>r.chamada_correta).length, total=dados.length;
             const grupos=guiches.filter(g=>guiche==='Todos'||g===guiche).map(g=>{
-                const linhas=registros.filter(r=>r.guiche===g), c=linhas.filter(r=>r.chamada_correta).length;
+                const linhas=registrosUnicos.filter(r=>r.guiche===g), c=linhas.filter(r=>r.chamada_correta).length;
                 return '<tr><td>'+esc(g)+'</td><td>'+c+'</td><td>'+(linhas.length-c)+'</td><td>'+(linhas.length?Math.round(c/linhas.length*100):0)+'%</td></tr>';
             }).join('');
             const detalhes=dados.slice(0,300).map(r=>{
                 const hora=new Date(r.chamada_em).toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'});
                 return '<tr><td>'+esc(hora)+'</td><td>'+esc(r.guiche)+'</td><td>'+esc(r.senha_chamada)+'</td><td>'+esc(r.senha_recomendada)+'</td><td>'+(r.chamada_correta?'✅':'❌')+'</td></tr>';
             }).join('');
-            corpo.innerHTML='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
+            corpo.innerHTML='<div style="padding:9px 11px;margin-bottom:12px;background:#3b2d12;border:1px solid #a16207;border-radius:8px;color:#fde68a;font-size:12px">⚠️ Resultado provisório: registros antigos podem conter recomendações incorretas. '+duplicadas+' possível(is) chamada(s) duplicada(s) ocultada(s) nesta visualização. Não use este percentual para avaliar funcionários sem auditoria.</div>'+ 
+'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
                 '<label>Unidade<br><select id="psb-rel-unidade" style="'+css+'">'+unidades.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===unidadeId?'selected':'')+'>'+esc(u.name)+'</option>').join('')+'</select></label>'+
                 '<label>Data<br><input id="psb-rel-data" type="date" value="'+esc(data)+'" style="'+css+'"></label>'+
                 '<label>Guichê<br><select id="psb-rel-guiche" style="'+css+'">'+['Todos',...guiches].map(g=>'<option '+(g===guiche?'selected':'')+'>'+esc(g)+'</option>').join('')+'</select></label>'+

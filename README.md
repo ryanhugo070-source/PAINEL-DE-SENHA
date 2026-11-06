@@ -385,31 +385,33 @@ async function carregarTemposSupabase() {
     }
 
     function monitorarBotaoChamar() {
-        // Captura a recomendacao antes de o Sabin retirar a senha da fila.
+        // A recomendacao deve ser congelada ANTES de o Sabin alterar a fila.
+        const capturar=()=>{
+            if(chamadaPendente&&Date.now()-chamadaPendente.ts<30000)return;
+            const senhaExibida=(document.getElementById('psb-recom-corpo')?.innerText||'').match(/\b[A-Z]{1,2}\d{3}\b/)?.[0];
+            const senha=senhaExibida||baseDados[0]?.senha||null;
+            chamadaPendente={senha,ts:Date.now()};
+            recomendadaSnapshot=senha;
+            snapshotTravado=true;
+            setTimeout(()=>{
+                if(chamadaPendente&&Date.now()-chamadaPendente.ts>=30000){
+                    chamadaPendente=null;
+                    snapshotTravado=false;
+                }
+            },31000);
+        };
         Array.from(document.querySelectorAll('button,a,div[role="button"]'))
             .filter(el=>{
                 if(el.closest('#painel-senhas-sabin'))return false;
                 const txt=(el.innerText||'').trim().replace(/\s+/g,' ');
-                return /Chamar Pr[oó]xima|Chamar Senha|^Chamar$|^Pr[oó]xima Senha$|Repetir Chamada/i.test(txt)
-                    && el.getBoundingClientRect().width>0;
+                return /Chamar Pr[oó]xima|Chamar Senha|^Chamar$|^Pr[oó]xima Senha$/i.test(txt)
+                    && !/Repetir/i.test(txt) && el.getBoundingClientRect().width>0;
             }).forEach(btn=>{
                 if(btn.dataset.psbMonitorado)return;
                 btn.dataset.psbMonitorado='1';
-                btn.addEventListener('click',()=>{
-                    if(/Repetir/i.test(btn.innerText||''))return;
-                    // Atualiza a fila ANTES de congelar a recomendacao.
-                    lerSenhas();
-                    const recomendadaNoClique=baseDados[0]?.senha||null;
-                    chamadaPendente={senha:recomendadaNoClique,ts:Date.now()};
-                    recomendadaSnapshot=recomendadaNoClique;
-                    snapshotTravado=true;
-                    setTimeout(()=>{
-                        if(chamadaPendente&&Date.now()-chamadaPendente.ts>=30000){
-                            chamadaPendente=null;
-                            snapshotTravado=false;
-                        }
-                    },31000);
-                },true);
+                btn.addEventListener('pointerdown',capturar,true);
+                btn.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')capturar();},true);
+                btn.addEventListener('click',capturar,true);
             });
     }
 
@@ -430,7 +432,7 @@ async function carregarTemposSupabase() {
         if(senhaAtual&&senhaAtual!==ultimaSenhaAtendimento){
             // Guarda o snapshot ANTES de qualquer atualização
             const pendenteValida=chamadaPendente&&Date.now()-chamadaPendente.ts<30000;
-            const recomendadaAgora=pendenteValida?chamadaPendente.senha:recomendadaSnapshot;
+            const recomendadaAgora=pendenteValida?chamadaPendente.senha:null;
             chamadaPendente=null;
             // Sem referencia confiavel, nao inventar acerto nem erro no relatorio.
             if(!recomendadaAgora){
@@ -470,7 +472,7 @@ async function carregarTemposSupabase() {
 
             // Destrava e atualiza snapshot DEPOIS de registrar
             snapshotTravado=false;
-            if(baseDados.length>0) recomendadaSnapshot=baseDados[0].senha;
+            recomendadaSnapshot=null;
         }
     }
 

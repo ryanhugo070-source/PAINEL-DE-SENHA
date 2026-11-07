@@ -579,14 +579,14 @@ salvarTempos(novos);
         modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:2147483648;display:flex;align-items:center;justify-content:center;font-family:Segoe UI,Arial,sans-serif;';
         const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
         const hoje=()=>{const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
-        let unidades=[], unidadeId=ID_UNIDADE, data=hoje(), guiche='Todos', registros=[];
+        let unidades=[], unidadeId=ID_UNIDADE, data=hoje(), guiche='Todos', registros=[], observacoes=[], erroObservacoes='';
         const css='padding:7px;background:#292929;color:white;border:1px solid #555;border-radius:6px;max-width:100%;';
         modal.innerHTML='<div style="background:#191919;color:white;border:2px solid #2d7dff;border-radius:12px;padding:18px;width:760px;max-width:95vw;max-height:88vh;overflow:auto"><div style="display:flex;justify-content:space-between;gap:10px"><b>📊 Relatório de Supervisão</b><button id="psb-rel-fechar">✕</button></div><div id="psb-rel-corpo" style="margin-top:15px">Carregando...</div></div>';
         document.body.appendChild(modal);
         modal.querySelector('#psb-rel-fechar').onclick=()=>modal.remove();
         const corpo=modal.querySelector('#psb-rel-corpo');
         function mostrar() {
-            const guiches=[...new Set(registros.map(r=>r.guiche).filter(Boolean))].sort((x,y)=>x.localeCompare(y,'pt-BR',{numeric:true}));
+            const guiches=[...new Set([...registros,...observacoes].map(r=>r.guiche).filter(Boolean))].sort((x,y)=>x.localeCompare(y,'pt-BR',{numeric:true}));
             if(guiche!=='Todos'&&!guiches.includes(guiche))guiche='Todos';
             const dados=registros.filter(r=>guiche==='Todos'||r.guiche===guiche)
                 .sort((a,b)=>new Date(b.chamada_em)-new Date(a.chamada_em));
@@ -610,12 +610,37 @@ salvarTempos(novos);
                 const duplicado=possiveisDuplicatas.has(r.id||String(r.guiche)+'|'+String(r.senha_chamada)+'|'+new Date(r.chamada_em).getTime());
                 return '<tr><td>'+esc(hora)+'</td><td>'+esc(r.guiche)+'</td><td><b>'+esc(r.senha_chamada)+'</b></td><td>'+esc(r.senha_recomendada)+'</td><td>'+(duplicado?'Possível duplicata':'Não verificado')+'</td></tr>';
             }).join('');
-            corpo.innerHTML='<div style="padding:12px;margin-bottom:14px;background:#422006;border:1px solid #d97706;border-radius:10px;color:#fef3c7;font-size:13px"><b>⚠️ AUDITORIA EM MANUTENÇÃO</b><div style="margin-top:5px">As recomendações históricas podem estar incorretas. Acertos, erros e percentuais foram ocultados para evitar avaliações injustas. A versão atual do painel não envia novas avaliações; computadores com código antigo ainda podem enviar.</div></div>'+
+
+            const piloto=observacoes.filter(r=>guiche==='Todos'||r.guiche===guiche)
+                .sort((a,b)=>new Date(b.criado_em)-new Date(a.criado_em));
+            const nCoincide=piloto.filter(r=>r.situacao==='coincide').length;
+            const nDiverge=piloto.filter(r=>r.situacao==='diverge').length;
+            const nIncertas=piloto.filter(r=>r.situacao==='nao_verificado'||r.situacao==='pendente').length;
+            const nomesStatus={coincide:'Coincide (conferir)',diverge:'Diverge (conferir)',
+                nao_verificado:'Não verificado',pendente:'Aguardando confirmação'};
+            const linhasPiloto=piloto.slice(0,300).map(r=>{
+                const hora=new Date(r.criado_em).toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'});
+                return '<tr><td>'+esc(hora)+'</td><td>'+esc(r.guiche)+'</td><td>'+esc(r.senha_recomendada||'—')+'</td><td>'+esc(r.senha_chamada||'—')+'</td><td>'+esc(nomesStatus[r.situacao]||r.situacao)+'</td><td>'+esc(r.motivo)+'</td></tr>';
+            }).join('');
+            const blocoPiloto='<div style="border:1px solid #2563eb;border-radius:10px;padding:12px;margin-bottom:18px;background:#0f172a">'+
+                '<div style="font-weight:700;margin-bottom:5px">🧪 Auditoria piloto V2 — Guichê 2 / Shopping Felicittá</div>'+
+                '<div style="font-size:12px;color:#cbd5e1;margin-bottom:12px">Observações técnicas, não avaliação de funcionários. Divergência não significa erro do atendente. Somente chamadas com captura estável são comparadas.</div>'+
+                (erroObservacoes?'<div style="color:#fbbf24;font-size:12px;margin-bottom:10px">⚠️ Piloto ainda não disponível no Supabase: '+esc(erroObservacoes)+'. É preciso executar o SQL central de ativação.</div>':'')+
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'+
+                '<div style="background:#1e293b;flex:1;padding:10px;border-radius:8px">Observações<br><b style="font-size:20px">'+piloto.length+'</b></div>'+
+                '<div style="background:#1e293b;flex:1;padding:10px;border-radius:8px">Coincidem<br><b style="font-size:20px">'+nCoincide+'</b></div>'+
+                '<div style="background:#1e293b;flex:1;padding:10px;border-radius:8px">Divergem<br><b style="font-size:20px">'+nDiverge+'</b></div>'+
+                '<div style="background:#1e293b;flex:1;padding:10px;border-radius:8px">Não verificadas / pendentes<br><b style="font-size:20px">'+nIncertas+'</b></div></div>'+
+                '<div style="overflow-x:auto"><table style="width:100%;text-align:left;font-size:12px"><thead><tr><th>Hora</th><th>Guichê</th><th>Recomendada</th><th>Chamada</th><th>Situação</th><th>Motivo</th></tr></thead><tbody>'+
+                (linhasPiloto||'<tr><td colspan="6">Sem observações do piloto nesta data / seleção.</td></tr>')+
+                '</tbody></table></div></div>';
+            corpo.innerHTML='<div style="padding:12px;margin-bottom:14px;background:#422006;border:1px solid #d97706;border-radius:10px;color:#fef3c7;font-size:13px"><b>⚠️ AUDITORIA EM MANUTENÇÃO</b><div style="margin-top:5px">As recomendações do histórico antigo podem estar incorretas. Acertos, erros e percentuais desse histórico foram ocultados. O piloto V2 registra somente observações técnicas no Guichê 2; computadores antigos ainda podem enviar dados ao histórico anterior.</div></div>'+
                 '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
                 '<label>Unidade<br><select id="psb-rel-unidade" style="'+css+'">'+unidades.map(u=>'<option value="'+esc(u.id)+'" '+(u.id===unidadeId?'selected':'')+'>'+esc(u.name)+'</option>').join('')+'</select></label>'+
                 '<label>Data<br><input id="psb-rel-data" type="date" value="'+esc(data)+'" style="'+css+'"></label>'+
                 '<label>Guichê<br><select id="psb-rel-guiche" style="'+css+'">'+['Todos',...guiches].map(g=>'<option '+(g===guiche?'selected':'')+'>'+esc(g)+'</option>').join('')+'</select></label>'+
                 '<button id="psb-rel-atualizar" style="'+css+';cursor:pointer;align-self:end">Atualizar</button></div>'+
+                blocoPiloto+
                 '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+
                 '<div style="background:#1e293b;padding:12px;border-radius:9px;flex:1">Registros históricos<br><b style="font-size:22px">'+dados.length+'</b></div>'+
                 '<div style="background:#1e293b;padding:12px;border-radius:9px;flex:1">Possíveis duplicatas<br><b style="font-size:22px">'+duplicadas+'</b></div>'+
@@ -637,6 +662,16 @@ salvarTempos(novos);
                     method:'POST',body:JSON.stringify({p_senha:senha,p_unit_id:unidadeId,p_data:data})
                 });
                 registros=Array.isArray(resposta)?resposta:[];
+                try {
+                    const respPiloto=await consultarSupabase('rpc/consultar_observacoes_v2',{
+                        method:'POST',body:JSON.stringify({p_senha:senha,p_unit_id:unidadeId,p_data:data})
+                    });
+                    observacoes=Array.isArray(respPiloto)?respPiloto:[];
+                    erroObservacoes='';
+                } catch(e) {
+                    observacoes=[];
+                    erroObservacoes=e.message||'serviço indisponível';
+                }
                 if(modal.isConnected)mostrar();
             } catch(e) {
                 if(modal.isConnected)corpo.textContent='Não foi possível consultar. Confira a senha e a configuração do Supabase. '+e.message;

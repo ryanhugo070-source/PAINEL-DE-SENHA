@@ -253,6 +253,52 @@ async function carregarTemposSupabase() {
     let guicheAtual=detectarGuiche();
     document.getElementById('psb-guiche').innerText=guicheAtual;
 
+    // Auditoria observacional V2: somente piloto em Guiche 2 / Shopping Felicittá.
+    // Nenhum resultado daqui deve ser usado para avaliacao funcional sem validacao.
+    let ultimaLeituraEm=0;
+    const pilotoAtivo=()=>unidadeSelecionada==='Shopping Felicittá' && guicheAtual==='Guiche 2';
+    let erroPilotoAvisado=false;
+    function senhasAtivasNaTela(){
+        const codigos=new Set();
+        Array.from(document.querySelectorAll('div')).forEach(el=>{
+            if(el.closest('#painel-senhas-sabin'))return;
+            const texto=(el.innerText||'').trim();
+            if(texto.length>250||!/TEMPO DE ATENDIMENTO/i.test(texto))return;
+            const encontradas=[...new Set(texto.match(/\b[A-Z]{1,2}\d{3}\b/g)||[])];
+            if(encontradas.length===1)codigos.add(encontradas[0]);
+        });
+        return codigos;
+    }
+    async function enviarObservacaoPiloto(captura, motivo, senhaChamada=null){
+        if(!captura?.eventoId||!captura.piloto)return false;
+        try {
+            const ok=await consultarSupabase('rpc/registrar_observacao_v2',{
+                method:'POST',body:JSON.stringify({
+                    p_evento_id:captura.eventoId,p_unit_id:ID_UNIDADE,
+                    p_guiche:'Guiche 2',p_senha_recomendada:captura.senha,
+                    p_senha_chamada:senhaChamada,p_tipo_acao:captura.tipo,p_motivo:motivo
+                })
+            });
+            if(ok!==true)console.warn('[Painel Sabin] Observacao piloto nao aceita:',motivo,senhaChamada);
+            return ok===true;
+        } catch(e) {
+            if(!erroPilotoAvisado){
+                console.warn('[Painel Sabin] Auditoria piloto ainda nao habilitada ou indisponivel no Supabase:',e);
+                erroPilotoAvisado=true;
+            }
+            return false;
+        }
+    }
+    function finalizarObservacao(captura,senhaChamada,motivo){
+        if(!captura||captura.finalizado)return;
+        captura.finalizado=true;
+        if(captura.piloto){
+            Promise.resolve(captura.envioInicial).then(()=>enviarObservacaoPiloto(captura,motivo,senhaChamada));
+        }
+        snapshotTravado=false;
+        recomendadaSnapshot=null;
+    }
+
     function lerSenhas() {
         guicheAtual=detectarGuiche();
         document.getElementById('psb-guiche').innerText=guicheAtual;
@@ -358,6 +404,7 @@ async function carregarTemposSupabase() {
                     </div>
                 </div>`;
         }
+        ultimaLeituraEm=Date.now();
         document.getElementById('psb-hora').innerText=new Date().toLocaleTimeString('pt-BR');
     }
 
@@ -384,21 +431,34 @@ async function carregarTemposSupabase() {
         }
     }
 
-    function monitorarBotaoChamar() {
-        // A recomendacao deve ser congelada ANTES de o Sabin alterar a fila.
-        const capturar=()=>{
-            if(chamadaPendente&&Date.now()-chamadaPendente.ts<30000)return;
-            const senhaExibida=(document.getElementById('psb-recom-corpo')?.innerText||'').match(/\b[A-Z]{1,2}\d{3}\b/)?.[0];
-            const senha=senhaExibida||baseDados[0]?.senha||null;
-            chamadaPendente={senha,ts:Date.now()};
+
+    function monitorarBotaoChamar(){
+        const capturar=btn=>{
+            const agora=Date.now();
+            if(chamadaPendente&&agora-chamadaPendente.ts<1200)return; // pointerdown + click
+            if(chamadaPendente){
+                finalizarObservacao(chamadaPendente,null,'tempo_esgotado');
+                chamadaPendente=null;
+            }
+            guicheAtual=detectarGuiche();
+            const textoBotao=(btn.innerText||'').trim().replace(/\s+/g,' ');
+            const tipo=/Pr[oó]xima/i.test(textoBotao)?'proxima':'manual';
+            const topo=baseDados[0]?.senha||null;
+            const senhaVisivel=(document.getElementById('psb-recom-corpo')?.innerText||'').match(/\b[A-Z]{1,2}\d{3}\b/)?.[0]||null;
+            // Sem confirmacao da leitura recente e do elemento visivel, nao assumir recomendacao.
+            const senha=(Date.now()-ultimaLeituraEm<5000&&senhaVisivel===topo
+                &&document.getElementById('psb-recomendada')?.style.display!=='none')?senhaVisivel:null;
+            const piloto=pilotoAtivo();
+            const eventoId=piloto&&window.crypto?.randomUUID?window.crypto.randomUUID():null;
+            const captura={
+                senha,ts:agora,tipo,piloto:piloto&&!!eventoId,eventoId,
+                antes:senhasAtivasNaTela(),candidato:null,candidatoDesde:0,
+                finalizado:false,envioInicial:null
+            };
+            chamadaPendente=captura;
             recomendadaSnapshot=senha;
             snapshotTravado=true;
-            setTimeout(()=>{
-                if(chamadaPendente&&Date.now()-chamadaPendente.ts>=30000){
-                    chamadaPendente=null;
-                    snapshotTravado=false;
-                }
-            },31000);
+            if(captura.piloto)captura.envioInicial=enviarObservacaoPiloto(captura,'aguardando');
         };
         Array.from(document.querySelectorAll('button,a,div[role="button"]'))
             .filter(el=>{
@@ -407,57 +467,48 @@ async function carregarTemposSupabase() {
                 return /Chamar Pr[oó]xima|Chamar Senha|^Chamar$|^Pr[oó]xima Senha$/i.test(txt)
                     && !/Repetir/i.test(txt) && el.getBoundingClientRect().width>0;
             }).forEach(btn=>{
-                if(btn.dataset.psbMonitorado)return;
-                btn.dataset.psbMonitorado='1';
-                btn.addEventListener('pointerdown',capturar,true);
-                btn.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')capturar();},true);
-                btn.addEventListener('click',capturar,true);
+                if(btn.dataset.psbMonitoradoV2)return;
+                btn.dataset.psbMonitoradoV2='1';
+                btn.addEventListener('pointerdown',()=>capturar(btn),true);
+                btn.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')capturar(btn);},true);
+                btn.addEventListener('click',()=>capturar(btn),true);
             });
     }
 
-    function verificarChamada() {
+    function verificarChamada(){
         monitorarBotaoChamar();
-        let senhaAtual=null;
-        Array.from(document.querySelectorAll('div')).forEach(el=>{
-            if(el.closest('#painel-senhas-sabin'))return;
-            const txt=el.innerText||'';
-            if(txt.length>500)return;
-            if(!/TEMPO DE ATENDIMENTO/i.test(txt))return;
-            const m=txt.match(/([A-Z]{1,2}\d{3})/);
-            if(m)senhaAtual=m[1];
-        });
-        if(!senhaAtual){ultimaSenhaAtendimento=null;return;}
-        const chaveChamada=guicheAtual+'|'+senhaAtual;
-        if(chamadasRecentes.has(chaveChamada)&&Date.now()-chamadasRecentes.get(chaveChamada)<90000){ultimaSenhaAtendimento=senhaAtual;return;}
-        if(senhaAtual&&senhaAtual!==ultimaSenhaAtendimento){
-            // Guarda o snapshot ANTES de qualquer atualização
-            const pendenteValida=chamadaPendente&&Date.now()-chamadaPendente.ts<30000;
-            const recomendadaAgora=pendenteValida?chamadaPendente.senha:null;
-            chamadaPendente=null;
-            // Sem referencia confiavel, nao inventar acerto nem erro no relatorio.
-            if(!recomendadaAgora){
-                console.warn('Chamada sem recomendacao verificavel; registro de conformidade ignorado:',senhaAtual);
-                ultimaSenhaAtendimento=senhaAtual;
-                snapshotTravado=false;
-                return;
-            }
-            const foiRecomendada=senhaAtual===recomendadaAgora;
-
-            ultimaSenhaAtendimento=senhaAtual;
-            chamadasRecentes.set(chaveChamada,Date.now());
-            for(const [chave,instante] of chamadasRecentes){if(Date.now()-instante>180000)chamadasRecentes.delete(chave);}
-
-            // Auditoria suspensa: o DOM nao comprova que a recomendacao
-            // capturada foi a exibida ao atendente no momento da chamada.
-            // Nao enviar comparacoes potencialmente falsas ao Supabase.
-            console.info('[Painel Sabin] Chamada detectada; classificacao suspensa ate validacao:',{
-                guiche:guicheAtual,senhaChamada:senhaAtual,recomendacaoCapturada:recomendadaAgora
-            });
-
-            // Destrava e atualiza snapshot DEPOIS de registrar
-            snapshotTravado=false;
-            recomendadaSnapshot=null;
+        const captura=chamadaPendente;
+        if(!captura||captura.finalizado)return;
+        const agora=Date.now();
+        if(agora-captura.ts>30000){
+            finalizarObservacao(captura,null,'tempo_esgotado');
+            if(chamadaPendente===captura)chamadaPendente=null;
+            return;
         }
+        const codigos=senhasAtivasNaTela();
+        // Nunca escolher arbitrariamente entre duas senhas de atendimento.
+        if(codigos.size!==1)return;
+        const ativa=[...codigos][0];
+        if(captura.antes.has(ativa))return;
+        if(captura.candidato!==ativa){
+            captura.candidato=ativa;
+            captura.candidatoDesde=agora;
+            return;
+        }
+        // Deve persistir pelo menos 1,5s para evitar uma transicao de tela.
+        if(agora-captura.candidatoDesde<1500)return;
+        const chave=guicheAtual+'|'+ativa;
+        const repetida=chamadasRecentes.has(chave)
+            &&agora-chamadasRecentes.get(chave)<90000;
+        const motivo=repetida||captura.antes.size>1?'captura_ambigua':
+            !captura.senha?'sem_recomendacao':
+            captura.tipo!=='proxima'?'chamada_manual':'chamada_confirmada';
+        chamadasRecentes.set(chave,agora);
+        for(const [chaveAntiga,instante] of chamadasRecentes){
+            if(agora-instante>180000)chamadasRecentes.delete(chaveAntiga);
+        }
+        finalizarObservacao(captura,ativa,motivo);
+        if(chamadaPendente===captura)chamadaPendente=null;
     }
 
     function abrirConfig() {

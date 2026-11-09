@@ -256,7 +256,7 @@ async function carregarTemposSupabase() {
     // Auditoria observacional V2: somente piloto em Guiche 2 / Shopping Felicittá.
     // Nenhum resultado daqui deve ser usado para avaliacao funcional sem validacao.
     let ultimaLeituraEm=0;
-    const pilotoAtivo=()=>unidadeSelecionada==='Shopping Felicittá' && guicheAtual==='Guiche 2';
+    const pilotoAtivo=()=>!!ID_UNIDADE && /^Guiche [1-9][0-9]{0,2}$/.test(guicheAtual);
     let erroPilotoAvisado=false;
     function senhasAtivasNaTela(){
         const codigos=new Set();
@@ -275,7 +275,7 @@ async function carregarTemposSupabase() {
             const ok=await consultarSupabase('rpc/registrar_observacao_v2',{
                 method:'POST',body:JSON.stringify({
                     p_evento_id:captura.eventoId,p_unit_id:ID_UNIDADE,
-                    p_guiche:'Guiche 2',p_senha_recomendada:captura.senha,
+                    p_guiche:captura.guiche,p_senha_recomendada:captura.senha,
                     p_senha_chamada:senhaChamada,p_tipo_acao:captura.tipo,p_motivo:motivo
                 })
             });
@@ -451,7 +451,7 @@ async function carregarTemposSupabase() {
             const piloto=pilotoAtivo();
             const eventoId=piloto&&window.crypto?.randomUUID?window.crypto.randomUUID():null;
             const captura={
-                senha,ts:agora,tipo,piloto:piloto&&!!eventoId,eventoId,
+                senha,ts:agora,tipo,guiche:guicheAtual,piloto:piloto&&!!eventoId,eventoId,
                 antes:senhasAtivasNaTela(),candidato:null,candidatoDesde:0,
                 finalizado:false,envioInicial:null
             };
@@ -485,6 +485,11 @@ async function carregarTemposSupabase() {
             if(chamadaPendente===captura)chamadaPendente=null;
             return;
         }
+        if(guicheAtual!==captura.guiche){
+            finalizarObservacao(captura,null,'tempo_esgotado');
+            if(chamadaPendente===captura)chamadaPendente=null;
+            return;
+        }
         const codigos=senhasAtivasNaTela();
         // Nunca escolher arbitrariamente entre duas senhas de atendimento.
         if(codigos.size!==1)return;
@@ -497,7 +502,7 @@ async function carregarTemposSupabase() {
         }
         // Deve persistir pelo menos 1,5s para evitar uma transicao de tela.
         if(agora-captura.candidatoDesde<1500)return;
-        const chave=guicheAtual+'|'+ativa;
+        const chave=captura.guiche+'|'+ativa;
         const repetida=chamadasRecentes.has(chave)
             &&agora-chamadasRecentes.get(chave)<90000;
         const motivo=repetida||captura.antes.size>1?'captura_ambigua':
@@ -624,8 +629,9 @@ salvarTempos(novos);
                 '</select></label>'+
                 '<button id="psb-rel-atualizar" style="'+css+';cursor:pointer">Atualizar</button></div>';
             const status='<div style="font-size:12px;color:#fcd34d;margin-bottom:12px">'+
-                '🧪 Auditoria em teste — dados provisórios. Não utilizar para avaliar atendentes.</div>'+
-                (erroObservacoes?'<div style="font-size:12px;color:#fca5a5;margin-bottom:10px">⚠️ Não foi possível consultar o piloto: '+esc(erroObservacoes)+'</div>':'');
+                '🧪 Monitoramento V2 em teste — todos os guichês. Não utilizar para avaliar atendentes.</div>'+
+                (erroObservacoes?'<div style="font-size:12px;color:#fca5a5;margin-bottom:10px">⚠️ Não foi possível consultar o monitoramento: '+esc(erroObservacoes)+'</div>':'')+
+                (observacoes.length>=1000?'<div style="font-size:12px;color:#fcd34d;margin-bottom:10px">Mostrando apenas os 1000 registros mais recentes desta unidade/data.</div>':'');
             const resumo='<div style="background:#1e293b;border-radius:8px;padding:10px 12px;margin-bottom:13px;font-size:13px;line-height:1.8">'+
                 '<b>'+piloto.length+'</b> chamada(s) registrada(s) &nbsp;·&nbsp; '+
                 '<b>'+coincidem+'</b> coincidem &nbsp;·&nbsp; '+

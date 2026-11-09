@@ -598,19 +598,24 @@ salvarTempos(novos);
                 .sort((a,b)=>new Date(b.criado_em)-new Date(a.criado_em));
             const historicos=registros.filter(r=>guiche==='Todos'||r.guiche===guiche)
                 .sort((a,b)=>new Date(b.chamada_em)-new Date(a.chamada_em));
-            const coincidem=piloto.filter(r=>r.situacao==='coincide').length;
-            const divergem=piloto.filter(r=>r.situacao==='diverge').length;
-            const semValidacao=piloto.filter(r=>r.situacao==='nao_verificado'||r.situacao==='pendente').length;
-            const rotulos={coincide:'Coincide*',diverge:'Diverge*',
-                nao_verificado:'Não verificada',pendente:'Pendente'};
+            // Comparacao visual simples, independente da classificacao tecnica.
+            // Nao constitui validacao da recomendacao no instante da chamada.
+            const comPar=piloto.filter(r=>r.senha_recomendada&&r.senha_chamada);
+            const corretas=comPar.filter(r=>r.senha_recomendada===r.senha_chamada).length;
+            const erradas=comPar.length-corretas;
+            const semDados=piloto.length-comPar.length;
             const linhaCss='padding:8px 5px;border-bottom:1px solid #303846;font-size:12px;';
             const linhas=piloto.slice(0,300).map(r=>{
                 const hora=new Date(r.criado_em).toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'});
+                const possuiPar=!!(r.senha_recomendada&&r.senha_chamada);
+                const igual=possuiPar&&r.senha_recomendada===r.senha_chamada;
+                const rotulo=possuiPar?(igual?'Correta*':'Errada*'):'—';
+                const cor=possuiPar?(igual?'#86efac':'#fca5a5'):'#94a3b8';
                 return '<tr><td style="'+linhaCss+'">'+esc(hora)+'</td>'+
                     '<td style="'+linhaCss+'">'+esc(r.guiche)+'</td>'+
                     '<td style="'+linhaCss+'">'+esc(r.senha_recomendada||'—')+'</td>'+
                     '<td style="'+linhaCss+'"><b>'+esc(r.senha_chamada||'—')+'</b></td>'+
-                    '<td style="'+linhaCss+'">'+esc(rotulos[r.situacao]||'Não verificada')+'</td></tr>';
+                    '<td style="'+linhaCss+';color:'+cor+'"><b>'+rotulo+'</b></td></tr>';
             }).join('');
             const historicoLinhas=historicos.slice(0,300).map(r=>{
                 const hora=new Date(r.chamada_em).toLocaleTimeString('pt-BR',{timeZone:'America/Sao_Paulo'});
@@ -634,16 +639,16 @@ salvarTempos(novos);
                 (observacoes.length>=1000?'<div style="font-size:12px;color:#fcd34d;margin-bottom:10px">Mostrando apenas os 1000 registros mais recentes desta unidade/data.</div>':'');
             const resumo='<div style="background:#1e293b;border-radius:8px;padding:10px 12px;margin-bottom:13px;font-size:13px;line-height:1.8">'+
                 '<b>'+piloto.length+'</b> chamada(s) registrada(s) &nbsp;·&nbsp; '+
-                '<b>'+coincidem+'</b> coincidem &nbsp;·&nbsp; '+
-                '<b>'+divergem+'</b> divergem &nbsp;·&nbsp; '+
-                '<b>'+semValidacao+'</b> sem verificação</div>';
+                '<b>'+corretas+'</b> corretas* &nbsp;·&nbsp; '+
+                '<b>'+erradas+'</b> erradas*'+
+                (semDados?' &nbsp;·&nbsp; <b>'+semDados+'</b> sem dados completos':'')+'</div>';
             const tabela='<div style="font-weight:700;font-size:13px;margin-bottom:8px">Chamadas do teste</div>'+
                 '<div style="overflow-x:auto"><table style="width:100%;text-align:left;border-collapse:collapse">'+
                 '<thead><tr><th>Hora</th><th>Guichê</th><th>Recomendada</th><th>Chamada</th><th>Situação</th></tr></thead>'+
                 '<tbody>'+(linhas||'<tr><td colspan="5" style="padding:12px 0;color:#aaa">Nenhuma chamada registrada neste período.</td></tr>')+
                 '</tbody></table></div>'+
                 '<div style="font-size:11px;color:#94a3b8;margin-top:9px;margin-bottom:13px">'+
-                '*Coincidência ou divergência são capturas do sistema, ainda não validadas como acerto ou erro.</div>';
+                '*Correta/Errada indica apenas se os dois códigos registrados são iguais ou diferentes. A captura ainda não foi validada e não deve ser usada para avaliar atendentes. Traço (—) indica dados insuficientes.</div>';
             const historico='<details style="border-top:1px solid #384152;margin-top:7px;padding-top:10px">'+
                 '<summary style="cursor:pointer;font-size:12px;color:#cbd5e1">Ver histórico anterior ('+historicos.length+' registros)</summary>'+
                 '<div style="font-size:11px;color:#fcd34d;margin:10px 0">Registros antigos sem validação de precisão; podem conter duplicatas ou recomendações incorretas.</div>'+

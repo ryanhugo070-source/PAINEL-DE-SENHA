@@ -99,8 +99,13 @@ async function carregarTemposSupabase() {
     }
 
     function detectarGuiche() {
-        const txt = document.body.innerText||'';
-        const m = txt.match(/Guiche\s*(\d+)/i)||txt.match(/Guich[êe]\s*#?\s*(\d+)/i);
+        // O relatório e o próprio painel podem exibir vários "Guiche N".
+        // Eles não podem determinar o guichê em que o Sabin está logado.
+        const txt = Array.from(document.body.children)
+            .filter(el => el.tagName !== 'STYLE' && el.tagName !== 'SCRIPT' &&
+                !['painel-senhas-sabin','psb-modal-relatorio','psb-selecao-unidade','psb-modal-config'].includes(el.id))
+            .map(el => (el.innerText || '').slice(0,6000)).join('\n');
+        const m = txt.match(/Guich[êe]\s*#?\s*(\d+)/i);
         return m ? 'Guiche '+m[1] : 'Guiche ?';
     }
 
@@ -360,10 +365,15 @@ async function carregarTemposSupabase() {
 
         // Fotografias recentes da fila preservam a recomendação ANTES
         // de o Sabin retirar a senha que acaba de ser chamada.
+        // Também memoriza qual senha já estava em atendimento nesta leitura.
+        // Assim, um snapshot posterior à chamada nunca será usado como
+        // se fosse a recomendação anterior à chamada.
+        const ativasNoSnapshot=senhasAtivasNaTela();
         historicoFila.push({
             ts:instanteLeitura,guiche:guicheAtual,
             recomendada:novas[0]?.senha||null,
-            codigos:novas.map(item=>item.senha)
+            codigos:novas.map(item=>item.senha),
+            ativa:ativasNoSnapshot.size===1?[...ativasNoSnapshot][0]:null
         });
         while(historicoFila.length>24||(historicoFila.length&&instanteLeitura-historicoFila[0].ts>30000)){
             historicoFila.shift();
@@ -504,20 +514,23 @@ async function carregarTemposSupabase() {
     let guicheBaseMonitorado=guicheAtual;
     const ativaInicial=senhasAtivasNaTela();
     let ultimaSenhaAtivaConfirmada=ativaInicial.size===1?[...ativaInicial][0]:null;
-    let candidataSemClique=null, candidataSemCliqueDesde=0, semAtivaDesde=0;
+    let candidataSemClique=null, candidataSemCliqueDesde=0, candidataRecomendacao=null, semAtivaDesde=0;
 
     function recomendacaoAnteriorParaSenha(codigo,inicioDaChamada){
-        // Usa apenas uma fila observada pouco antes, no mesmo guichê,
-        // em que a senha efetivamente chamada ainda estava na espera.
+        // Pega a última recomendação REALMENTE observada antes da troca
+        // da senha em atendimento, mesmo que a chamada tenha sido por
+        // transferência e não aparecesse na fila.
         const capturas=historicoFila.filter(item=>
-            item.guiche===guicheAtual&&item.ts<=inicioDaChamada&&
-            inicioDaChamada-item.ts<=7000&&item.recomendada&&
-            item.codigos.includes(codigo)
+            item.guiche===guicheAtual&&
+            item.ts<=inicioDaChamada&&
+            inicioDaChamada-item.ts<=6000&&
+            item.recomendada&&item.ativa!==codigo
         );
+        // Sem fotografia válida de antes da transição, não é seguro
+        // atribuir "Correta" ou "Errada".
         return capturas.length?capturas[capturas.length-1].recomendada:null;
     }
-    function registrarChamadaSemClique(codigo,agora,inicioDaChamada){
-        const senha=recomendacaoAnteriorParaSenha(codigo,inicioDaChamada);
+    function registrarChamadaSemClique(codigo,agora,senha){
         const piloto=pilotoAtivo();
         const eventoId=piloto&&window.crypto?.randomUUID?window.crypto.randomUUID():null;
         const captura={
@@ -539,6 +552,7 @@ async function carregarTemposSupabase() {
             guicheBaseMonitorado=guicheAtual;
             ultimaSenhaAtivaConfirmada=ativa;
             candidataSemClique=null;
+            candidataRecomendacao=null;
             semAtivaDesde=0;
             if(chamadaPendente){
                 finalizarObservacao(chamadaPendente,null,'tempo_esgotado');
@@ -574,6 +588,7 @@ async function carregarTemposSupabase() {
                 if(chamadaPendente===captura)chamadaPendente=null;
                 ultimaSenhaAtivaConfirmada=ativa;
                 candidataSemClique=null;
+                candidataRecomendacao=null;
                 semAtivaDesde=0;
                 return;
             }
@@ -585,26 +600,31 @@ async function carregarTemposSupabase() {
             if(!semAtivaDesde)semAtivaDesde=agora;
             if(agora-semAtivaDesde>10000)ultimaSenhaAtivaConfirmada=null;
             candidataSemClique=null;
+            candidataRecomendacao=null;
             return;
         }
         semAtivaDesde=0;
         if(ativa===ultimaSenhaAtivaConfirmada){
             candidataSemClique=null;
+            candidataRecomendacao=null;
             return;
         }
         if(candidataSemClique!==ativa){
             candidataSemClique=ativa;
             candidataSemCliqueDesde=agora;
+            // Congela a recomendação no instante de início da nova chamada.
+            candidataRecomendacao=recomendacaoAnteriorParaSenha(ativa,agora);
             return;
         }
         if(agora-candidataSemCliqueDesde<1500)return;
-        const inicioDaChamada=candidataSemCliqueDesde;
+        const recomendacaoAnterior=candidataRecomendacao;
         ultimaSenhaAtivaConfirmada=ativa;
         candidataSemClique=null;
+        candidataRecomendacao=null;
         const chave=guicheAtual+'|'+ativa;
         if(agora-(chamadasRecentes.get(chave)||0)<8000)return;
         chamadasRecentes.set(chave,agora);
-        registrarChamadaSemClique(ativa,agora,inicioDaChamada);
+        registrarChamadaSemClique(ativa,agora,recomendacaoAnterior);
     }
 
     function abrirConfig() {
@@ -808,7 +828,8 @@ salvarTempos(novos);
 
     const intLer=setInterval(()=>{
         if(!document.getElementById('painel-senhas-sabin')){clearInterval(intLer);clearInterval(intTick);clearInterval(intChamada);clearInterval(intSync);return;}
-        lerSenhas();verificarChamada();
+        // Primeiro reconhece a transição, antes de ler a fila já modificada.
+        verificarChamada();lerSenhas();
     },2000);
     const intTick=setInterval(()=>{
         if(!document.getElementById('painel-senhas-sabin')){clearInterval(intTick);return;}

@@ -475,45 +475,103 @@ async function carregarTemposSupabase() {
             });
     }
 
+
+    // Monitoramento adicional: acompanha a senha que entrou em atendimento
+    // mesmo quando o Sabin não expõe um clique de "Chamar" ao painel.
+    let guicheBaseMonitorado=guicheAtual;
+    const ativaInicial=senhasAtivasNaTela();
+    let ultimaSenhaAtivaConfirmada=ativaInicial.size===1?[...ativaInicial][0]:null;
+    let candidataSemClique=null, candidataSemCliqueDesde=0, semAtivaDesde=0;
+
+    function registrarChamadaSemClique(codigo,agora){
+        const piloto=pilotoAtivo();
+        const eventoId=piloto&&window.crypto?.randomUUID?window.crypto.randomUUID():null;
+        // A recomendação anterior não é verificável sem o evento do clique.
+        // Contar a senha, mas não atribuir um acerto ou erro especulativo.
+        const captura={
+            senha:null,ts:agora,tipo:'manual',guiche:guicheAtual,
+            piloto:piloto&&!!eventoId,eventoId,finalizado:false,envioInicial:null
+        };
+        if(captura.piloto)captura.envioInicial=enviarObservacaoPiloto(captura,'aguardando');
+        finalizarObservacao(captura,codigo,'sem_recomendacao');
+    }
+
     function verificarChamada(){
         monitorarBotaoChamar();
-        const captura=chamadaPendente;
-        if(!captura||captura.finalizado)return;
         const agora=Date.now();
-        if(agora-captura.ts>30000){
-            finalizarObservacao(captura,null,'tempo_esgotado');
-            if(chamadaPendente===captura)chamadaPendente=null;
-            return;
-        }
-        if(guicheAtual!==captura.guiche){
-            finalizarObservacao(captura,null,'tempo_esgotado');
-            if(chamadaPendente===captura)chamadaPendente=null;
-            return;
-        }
         const codigos=senhasAtivasNaTela();
-        // Nunca escolher arbitrariamente entre duas senhas de atendimento.
-        if(codigos.size!==1)return;
-        const ativa=[...codigos][0];
-        if(captura.antes.has(ativa))return;
-        if(captura.candidato!==ativa){
-            captura.candidato=ativa;
-            captura.candidatoDesde=agora;
+        const ativa=codigos.size===1?[...codigos][0]:null;
+
+        // Troca de guichê: a senha que já estava aberta não é nova chamada.
+        if(guicheBaseMonitorado!==guicheAtual){
+            guicheBaseMonitorado=guicheAtual;
+            ultimaSenhaAtivaConfirmada=ativa;
+            candidataSemClique=null;
+            semAtivaDesde=0;
+            if(chamadaPendente){
+                finalizarObservacao(chamadaPendente,null,'tempo_esgotado');
+                chamadaPendente=null;
+            }
             return;
         }
-        // Deve persistir pelo menos 1,5s para evitar uma transicao de tela.
-        if(agora-captura.candidatoDesde<1500)return;
-        const chave=captura.guiche+'|'+ativa;
-        const repetida=chamadasRecentes.has(chave)
-            &&agora-chamadasRecentes.get(chave)<90000;
-        const motivo=repetida||captura.antes.size>1?'captura_ambigua':
-            !captura.senha?'sem_recomendacao':
-            captura.tipo!=='proxima'?'chamada_manual':'chamada_confirmada';
-        chamadasRecentes.set(chave,agora);
-        for(const [chaveAntiga,instante] of chamadasRecentes){
-            if(agora-instante>180000)chamadasRecentes.delete(chaveAntiga);
+
+        const captura=chamadaPendente;
+        if(captura&&!captura.finalizado){
+            if(agora-captura.ts>30000||guicheAtual!==captura.guiche){
+                finalizarObservacao(captura,null,'tempo_esgotado');
+                if(chamadaPendente===captura)chamadaPendente=null;
+            } else {
+                if(!ativa||captura.antes.has(ativa))return;
+                if(captura.candidato!==ativa){
+                    captura.candidato=ativa;
+                    captura.candidatoDesde=agora;
+                    return;
+                }
+                if(agora-captura.candidatoDesde<1500)return;
+                const chave=captura.guiche+'|'+ativa;
+                const repetida=chamadasRecentes.has(chave)
+                    &&agora-chamadasRecentes.get(chave)<90000;
+                const motivo=repetida||captura.antes.size>1?'captura_ambigua':
+                    !captura.senha?'sem_recomendacao':
+                    captura.tipo!=='proxima'?'chamada_manual':'chamada_confirmada';
+                chamadasRecentes.set(chave,agora);
+                for(const [chaveAntiga,instante] of chamadasRecentes){
+                    if(agora-instante>180000)chamadasRecentes.delete(chaveAntiga);
+                }
+                finalizarObservacao(captura,ativa,motivo);
+                if(chamadaPendente===captura)chamadaPendente=null;
+                ultimaSenhaAtivaConfirmada=ativa;
+                candidataSemClique=null;
+                semAtivaDesde=0;
+                return;
+            }
         }
-        finalizarObservacao(captura,ativa,motivo);
-        if(chamadaPendente===captura)chamadaPendente=null;
+
+        // Detecta a troca real de senha sem clique capturado.
+        // Aguarda estabilidade para evitar chamadas fictícias durante transições.
+        if(!ativa){
+            if(!semAtivaDesde)semAtivaDesde=agora;
+            if(agora-semAtivaDesde>10000)ultimaSenhaAtivaConfirmada=null;
+            candidataSemClique=null;
+            return;
+        }
+        semAtivaDesde=0;
+        if(ativa===ultimaSenhaAtivaConfirmada){
+            candidataSemClique=null;
+            return;
+        }
+        if(candidataSemClique!==ativa){
+            candidataSemClique=ativa;
+            candidataSemCliqueDesde=agora;
+            return;
+        }
+        if(agora-candidataSemCliqueDesde<1500)return;
+        ultimaSenhaAtivaConfirmada=ativa;
+        candidataSemClique=null;
+        const chave=guicheAtual+'|'+ativa;
+        if(agora-(chamadasRecentes.get(chave)||0)<8000)return;
+        chamadasRecentes.set(chave,agora);
+        registrarChamadaSemClique(ativa,agora);
     }
 
     function abrirConfig() {
@@ -726,7 +784,7 @@ salvarTempos(novos);
     const intChamada=setInterval(()=>{
         if(!document.getElementById('painel-senhas-sabin')){clearInterval(intChamada);return;}
         verificarChamada();
-    },2000);
+    },1000);
 
     }
         const UNIDADES = [
